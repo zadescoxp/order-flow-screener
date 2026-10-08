@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useCallback } from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
 import type { FootprintCandle, FootprintLevel } from "@/lib/types/market";
+import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Footprint Chart — Canvas Renderer ─────────────────────────────
 // This renders the actual price×time×volume footprint chart.
@@ -343,9 +344,65 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         const dx = e.clientX - dragStartRef.current.x;
         scrollRef.current = dragStartRef.current.scroll - dx;
         draw();
+        hideTooltip();
+        return;
+      }
+
+      // Crosshair sync
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const LEVEL_HEIGHT = zoomRef.current;
+      const CANDLE_WIDTH = 120;
+      const PRICE_COL_WIDTH = 60;
+      const BOTTOM_TABLE_HEIGHT = 50;
+      const chartH = canvas.height - BOTTOM_TABLE_HEIGHT;
+
+      // Determine candle and price from cursor position
+      const candleIndex = Math.floor((x - PRICE_COL_WIDTH + scrollRef.current) / CANDLE_WIDTH);
+      const candle = allCandles[candleIndex];
+      
+      if (candle) {
+        const allPrices = new Set<number>();
+        for (const c of allCandles) {
+          for (const p of c.sortedPrices) allPrices.add(p);
+        }
+        const sortedPrices = [...allPrices].sort((a, b) => b - a);
+        const totalHeight = sortedPrices.length * LEVEL_HEIGHT;
+        const topOffset = Math.max(0, (chartH - totalHeight) / 2);
+        
+        // Are we in the bottom table area?
+        if (y >= chartH) {
+           const title = "Candle Summary Metrics";
+           const content = `Delta: ${candle.delta.toFixed(1)} (Net Buying/Selling Pressure)\nCum Delta: ${candle.cumulativeDelta.toFixed(1)} (Session Trend)\nTotal Volume: ${candle.volume.toFixed(1)}\n\nWhat this means: Delta shows who is in control for this candle. Positive means aggressive buyers, negative means aggressive sellers.`;
+           showTooltip(title, content, e);
+           setCrosshair(candle.openTime, null);
+           return;
+        }
+
+        const priceIndex = Math.floor((y - 14 - topOffset) / LEVEL_HEIGHT);
+        const price = sortedPrices[priceIndex];
+        if (price !== undefined) {
+          setCrosshair(candle.openTime, price);
+          const level = candle.levels.get(price);
+          if (level) {
+            const title = `Price Level: ${price.toLocaleString()}`;
+            const isBuyDom = level.askVolume > level.bidVolume;
+            const domText = isBuyDom ? "Buyers (Asks)" : "Sellers (Bids)";
+            const content = `Bid Vol: ${level.bidVolume.toFixed(2)}\nAsk Vol: ${level.askVolume.toFixed(2)}\nTotal Vol: ${level.totalVolume.toFixed(2)}\n\nWhat this means: This block shows market orders executed here. ${domText} were more aggressive, creating a ${isBuyDom ? 'positive' : 'negative'} delta of ${(level.askVolume - level.bidVolume).toFixed(2)}.`;
+            showTooltip(title, content, e);
+          } else {
+            hideTooltip();
+          }
+        } else {
+          hideTooltip();
+        }
+      } else {
+        hideTooltip();
       }
     },
-    [draw]
+    [draw, allCandles, setCrosshair]
   );
 
   const handleMouseUp = useCallback(() => {

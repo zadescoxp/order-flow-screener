@@ -242,34 +242,37 @@ export default function TopBar() {
       {/* ── Connection status (right-aligned) ── */}
       <ConnectionStatus />
 
-      <div className="topbar-sep" />
+      {/* ── Spacer ── */}
+      <div style={{ flex: 1 }} />
 
       {/* ── External links ── */}
-      <a
-        href="https://x.com/zadescoxp"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="btn"
-        style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px" }}
-        title="X / Twitter"
-      >
-        𝕏 @zadescoxp
-      </a>
-      <a
-        href="https://github.com"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="btn"
-        style={{ padding: "2px 8px", display: "flex", alignItems: "center", gap: 6 }}
-        title="Contribute"
-      >
-        <img 
-          src="https://cdn.pixabay.com/photo/2022/01/30/13/33/github-6980894_640.png" 
-          alt="GitHub"
-          style={{ width: 14, height: 14, objectFit: "contain", filter: "invert(1)" }} 
-        />
-        <span style={{ fontSize: 11, fontWeight: 600 }}>Contribute</span>
-      </a>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+        <a
+          href="https://x.com/zadescoxp"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn"
+          style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px" }}
+          title="X / Twitter"
+        >
+          𝕏 @zadescoxp
+        </a>
+        <a
+          href="https://github.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn"
+          style={{ padding: "2px 8px", display: "flex", alignItems: "center", gap: 6 }}
+          title="Contribute"
+        >
+          <img
+            src="https://cdn.pixabay.com/photo/2022/01/30/13/33/github-6980894_640.png"
+            alt="GitHub"
+            style={{ width: 14, height: 14, objectFit: "contain", filter: "invert(1)" }}
+          />
+          <span style={{ fontSize: 11, fontWeight: 600 }}>Contribute</span>
+        </a>
+      </div>
     </div>
   );
 }

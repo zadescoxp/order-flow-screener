@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useCallback, useState } from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
+import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Trades Profile Panel (Canvas) ─────────────────────────────
 // Horizontal profile of executed trades at each price level.
@@ -131,6 +132,32 @@ export default function TradesProfilePanel() {
     return () => obs.disconnect();
   }, [draw]);
 
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas || profile.length === 0) {
+      hideTooltip();
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const rowH = Math.max(2, Math.floor(canvas.height / profile.length));
+    const index = Math.floor(y / rowH);
+    const level = profile[index];
+    
+    if (level) {
+      const title = `Recent Trades at ${level.price.toLocaleString()}`;
+      let content = "";
+      if (tab === "volume") {
+         content = `Buy Vol: ${level.buyVol.toFixed(2)}\nSell Vol: ${level.sellVol.toFixed(2)}\nTotal Vol: ${level.totalVol.toFixed(2)}\n\nWhat this means: This shows the total volume of market orders filled at this price recently.`;
+      } else {
+         content = `Buy Trades: ${level.buyTrades}\nSell Trades: ${level.sellTrades}\nTotal Trades: ${level.totalTrades}\n\nWhat this means: This shows the NUMBER of individual market orders executed at this price recently.`;
+      }
+      showTooltip(title, content, e);
+    } else {
+      hideTooltip();
+    }
+  }, [profile, tab]);
+
   return (
     <div className="panel" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="panel-header">
@@ -153,7 +180,12 @@ export default function TradesProfilePanel() {
         </div>
       </div>
       <div ref={containerRef} className="panel-content">
-        <canvas ref={canvasRef} style={{ display: "block" }} />
+        <canvas 
+          ref={canvasRef} 
+          style={{ display: "block", cursor: "crosshair" }} 
+          onMouseMove={handleMouseMove}
+          onMouseLeave={hideTooltip}
+        />
       </div>
     </div>
   );

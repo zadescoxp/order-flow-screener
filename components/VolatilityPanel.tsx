@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useCallback, useState } from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
+import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Volatility / Z-Score Panel (Canvas) ────────────────────────
 // Rolling Z-score of trade volume, with Volume Heatmap option.
@@ -169,6 +170,33 @@ export default function VolatilityPanel() {
     return () => obs.disconnect();
   }, [draw]);
 
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas || zScoreHistory.length < 2) { hideTooltip(); return; }
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const data = zScoreHistory.slice(-Math.floor(canvas.width));
+    const step = canvas.width / data.length;
+    const index = Math.min(data.length - 1, Math.floor(x / step));
+    const point = data[index];
+    if (point) {
+      const z = point.value;
+      const absZ = Math.abs(z);
+      let intensity = "Normal";
+      if (absZ >= 3) intensity = "🚨 Extreme spike — very unusual volume";
+      else if (absZ >= 2) intensity = "⚠️ High — elevated volume spike";
+      else if (absZ >= 1) intensity = "📈 Elevated — above average volume";
+      else intensity = "Normal — average volume range";
+      showTooltip(
+        `Z-Score: ${z >= 0 ? "+" : ""}${z.toFixed(2)}`,
+        `Intensity: ${intensity}\nTime: ${new Date(point.timestamp).toLocaleTimeString()}\n\nWhat this means: The Z-Score compares current trade volume against the rolling average. A Z-Score above +2 or below -2 signals an unusual volume spike — often a sign of institutional activity or news-driven momentum.`,
+        e
+      );
+    } else {
+      hideTooltip();
+    }
+  }, [zScoreHistory]);
+
   const lastZ = zScoreHistory[zScoreHistory.length - 1]?.value ?? 0;
 
   return (
@@ -222,7 +250,12 @@ export default function VolatilityPanel() {
         </div>
       </div>
       <div ref={containerRef} className="panel-content">
-        <canvas ref={canvasRef} style={{ display: "block" }} />
+        <canvas
+          ref={canvasRef}
+          style={{ display: "block", cursor: "crosshair" }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={hideTooltip}
+        />
       </div>
     </div>
   );

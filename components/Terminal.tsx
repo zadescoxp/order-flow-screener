@@ -11,6 +11,7 @@ import OBIPanel from "@/components/OBIPanel";
 import DepthOfMarket from "@/components/DepthOfMarket";
 import VolatilityPanel from "@/components/VolatilityPanel";
 import TradesProfilePanel from "@/components/TradesProfile";
+import GlobalTooltip from "@/components/GlobalTooltip";
 
 // ─── Main Terminal Layout ────────────────────────────────────────
 // Flex layout for resizable panels
@@ -31,6 +32,7 @@ export default function Terminal() {
         background: "var(--bg-base)",
       }}
     >
+      <GlobalTooltip />
       <TopBar />
 
       <div

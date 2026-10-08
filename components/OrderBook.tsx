@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useCallback } from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
 import type { NormalizedOrderBook } from "@/lib/types/market";
+import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Order Book Panel ────────────────────────────────────────────
 // Shows live bid/ask levels with cumulative size bars.
@@ -127,7 +128,19 @@ export default function OrderBookPanel() {
       <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
         <div>
           {asksWithCum.map((ask) => (
-            <div className="ob-row" key={ask.price} style={{ position: "relative" }}>
+            <div 
+              className="ob-row" 
+              key={ask.price} 
+              style={{ position: "relative", cursor: "crosshair" }}
+              onMouseMove={(e) => {
+                showTooltip(
+                  `Ask Level: ${formatPrice(ask.price)}`,
+                  `Size at Price: ${formatSize(ask.size)}\nCumulative Size: ${formatSize(ask.cum)}\n\nWhat this means: There are pending limit sell orders resting at this price. The cumulative size tells you the total amount of sellers blocking the price from moving up to this level.`,
+                  e
+                );
+              }}
+              onMouseLeave={hideTooltip}
+            >
               {/* Depth bar */}
               <div
                 className="ob-depth-bar ask"
@@ -170,7 +183,19 @@ export default function OrderBookPanel() {
         {/* Bids */}
         <div>
           {bidsWithCum.map((bid) => (
-            <div className="ob-row" key={bid.price} style={{ position: "relative" }}>
+            <div 
+              className="ob-row" 
+              key={bid.price} 
+              style={{ position: "relative", cursor: "crosshair" }}
+              onMouseMove={(e) => {
+                showTooltip(
+                  `Bid Level: ${formatPrice(bid.price)}`,
+                  `Size at Price: ${formatSize(bid.size)}\nCumulative Size: ${formatSize(bid.cum)}\n\nWhat this means: There are pending limit buy orders resting at this price. The cumulative size tells you the total amount of buyers supporting the price from dropping down to this level.`,
+                  e
+                );
+              }}
+              onMouseLeave={hideTooltip}
+            >
               {/* Depth bar */}
               <div
                 className="ob-depth-bar bid"

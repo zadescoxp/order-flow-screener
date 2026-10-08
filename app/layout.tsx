@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Order Flow Tracker — Crypto Market Screening Terminal",
+  title: "Order Flow Screener — Crypto Market Screening Terminal",
   description:
     "Professional real-time crypto market-data screening terminal. Live footprint charts, order flow analysis, order book, volume profile, OBI, and depth of market.",
 };
@@ -26,7 +27,22 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        {/* Google Analytics 4 — uses next/script to avoid SSR script warning */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-RECLTGYHCC"
+          strategy="afterInteractive"
+        />
+        <Script id="ga4-init" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-RECLTGYHCC');
+          `}
+        </Script>
+      </body>
     </html>
   );
 }

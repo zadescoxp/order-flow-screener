@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useCallback } from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
+import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Volume Profile (Canvas) ─────────────────────────────────────
 // Horizontal bar chart showing volume at each price level.
@@ -179,6 +180,35 @@ export default function VolumeProfilePanel() {
     return () => obs.disconnect();
   }, [draw]);
 
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !volumeProfile || volumeProfile.levels.length === 0) {
+      hideTooltip();
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    
+    const levels = [...volumeProfile.levels].sort((a, b) => b.price - a.price);
+    const rowH = Math.max(2, Math.floor(canvas.height / levels.length));
+    const index = Math.floor(y / rowH);
+    const level = levels[index];
+    
+    if (level) {
+      const title = `Volume Profile at ${level.price.toLocaleString()}`;
+      let extra = "";
+      if (level.isPOC) extra = "\n(This is the Point of Control - POC: Highest volume price level)";
+      if (level.isVAH) extra = "\n(Value Area High - Top of where 70% of volume occurred)";
+      if (level.isVAL) extra = "\n(Value Area Low - Bottom of where 70% of volume occurred)";
+      
+      const content = `Total Volume: ${level.totalVolume.toFixed(2)}\nBuy Volume: ${level.askVolume.toFixed(2)}\nSell Volume: ${level.bidVolume.toFixed(2)}\nDelta: ${level.delta.toFixed(2)}${extra}\n\nWhat this means: This bar represents the historical accumulation of executed market orders at this price level for the entire session.`;
+      
+      showTooltip(title, content, e);
+    } else {
+      hideTooltip();
+    }
+  }, [volumeProfile]);
+
   const vp = volumeProfile;
 
   return (
@@ -200,7 +230,12 @@ export default function VolumeProfilePanel() {
       </div>
 
       <div ref={containerRef} className="panel-content">
-        <canvas ref={canvasRef} style={{ display: "block" }} />
+        <canvas 
+          ref={canvasRef} 
+          style={{ display: "block", cursor: "crosshair" }} 
+          onMouseMove={handleMouseMove}
+          onMouseLeave={hideTooltip}
+        />
       </div>
 
       {/* Stats footer */}

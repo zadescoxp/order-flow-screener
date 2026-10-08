@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useCallback } from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
+import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Depth of Market (Canvas) ───────────────────────────────────
 // Cumulative bid/ask depth curve, synchronized with crosshair.
@@ -171,20 +172,16 @@ export default function DepthOfMarket() {
     // Legend
     const bidTotal = cumBid;
     const askTotal = cumAsk;
+    const fmt = (v: number) =>
+      v >= 1_000_000 ? (v / 1_000_000).toFixed(2) + "M"
+      : v >= 1_000   ? (v / 1_000).toFixed(2) + "K"
+      : v.toFixed(4);
     ctx.font = "9px monospace";
     ctx.textAlign = "left";
     ctx.fillStyle = "#26a69a";
-    ctx.fillText(
-      `■ Bids ${bidTotal >= 1e6 ? (bidTotal / 1e6).toFixed(1) + "M" : (bidTotal / 1000).toFixed(0) + "K"}`,
-      4,
-      12
-    );
+    ctx.fillText(`■ Bids ${fmt(bidTotal)}`, 4, 12);
     ctx.fillStyle = "#ef5350";
-    ctx.fillText(
-      `■ Asks ${askTotal >= 1e6 ? (askTotal / 1e6).toFixed(1) + "M" : (askTotal / 1000).toFixed(0) + "K"}`,
-      4,
-      22
-    );
+    ctx.fillText(`■ Asks ${fmt(askTotal)}`, 4, 22);
   }, [orderBook, crosshairPrice, ticker]);
 
   useEffect(() => {
@@ -209,6 +206,54 @@ export default function DepthOfMarket() {
     return () => obs.disconnect();
   }, [draw]);
 
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !orderBook || !ticker) {
+      hideTooltip();
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    
+    const midPrice = ticker.price;
+    const bids = orderBook.bids.slice(0, 50);
+    const asks = orderBook.asks.slice(0, 50);
+    if (bids.length === 0 || asks.length === 0) return;
+
+    const minPrice = bids[bids.length - 1]?.price ?? midPrice * 0.98;
+    const maxPrice = asks[asks.length - 1]?.price ?? midPrice * 1.02;
+    const priceRange = maxPrice - minPrice;
+
+    // Convert x back to price
+    const hoveredPrice = minPrice + (x / canvas.width) * priceRange;
+
+    // Is it a bid or ask?
+    if (hoveredPrice < midPrice) {
+      // Find closest bid
+      let cumSize = 0;
+      for (const b of bids) {
+        cumSize += b.size;
+        if (b.price <= hoveredPrice) break; // accumulated up to this price going down
+      }
+      showTooltip(
+        `Bid Depth around ${hoveredPrice.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
+        `Cumulative Bid Size: ${cumSize.toFixed(2)}\n\nWhat this means: This is the total limit buy order size supporting the price from falling down to this level.`,
+        e
+      );
+    } else {
+      let cumSize = 0;
+      for (const a of asks) {
+        cumSize += a.size;
+        if (a.price >= hoveredPrice) break; // accumulated up to this price going up
+      }
+      showTooltip(
+        `Ask Depth around ${hoveredPrice.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
+        `Cumulative Ask Size: ${cumSize.toFixed(2)}\n\nWhat this means: This is the total limit sell order size blocking the price from rising up to this level.`,
+        e
+      );
+    }
+  }, [orderBook, ticker]);
+
   return (
     <div className="panel" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="panel-header">
@@ -220,7 +265,12 @@ export default function DepthOfMarket() {
         )}
       </div>
       <div ref={containerRef} className="panel-content">
-        <canvas ref={canvasRef} style={{ display: "block" }} />
+        <canvas 
+          ref={canvasRef} 
+          style={{ display: "block", cursor: "crosshair" }} 
+          onMouseMove={handleMouseMove}
+          onMouseLeave={hideTooltip}
+        />
       </div>
     </div>
   );
