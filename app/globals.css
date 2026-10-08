@@ -1,26 +1,353 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ─── Terminal Color Palette ─── */
+  --bg-base: #0a0a0c;
+  --bg-surface: #0f0f12;
+  --bg-panel: #111116;
+  --bg-panel-alt: #13131a;
+  --bg-hover: #1a1a22;
+  --bg-active: #1f1f2a;
+
+  --border: #1e1e2a;
+  --border-muted: #161620;
+
+  --text-primary: #e8e8f0;
+  --text-secondary: #7a7a99;
+  --text-muted: #4a4a66;
+  --text-accent: #9a9acc;
+
+  /* Trading colors */
+  --buy: #26a69a;
+  --buy-dim: #1a6e69;
+  --buy-bg: rgba(38, 166, 154, 0.08);
+  --buy-border: rgba(38, 166, 154, 0.3);
+
+  --sell: #ef5350;
+  --sell-dim: #9e3836;
+  --sell-bg: rgba(239, 83, 80, 0.08);
+  --sell-border: rgba(239, 83, 80, 0.3);
+
+  --neutral: #5c5c80;
+  --highlight: #7c6af5;
+  --highlight-dim: rgba(124, 106, 245, 0.2);
+
+  --poc: #f5c842;
+  --vah: rgba(245, 200, 66, 0.5);
+  --val: rgba(245, 200, 66, 0.5);
+
+  /* Z-Score levels */
+  --z-extreme: #ff4444;
+  --z-high: #ff8800;
+  --z-elevated: #ffcc00;
+  --z-normal: #444466;
+
+  /* Imbalance */
+  --imbalance-ask: rgba(38, 166, 154, 0.22);
+  --imbalance-bid: rgba(239, 83, 80, 0.22);
+
+  /* Stacked imbalance */
+  --stacked-ask: rgba(38, 166, 154, 0.45);
+  --stacked-bid: rgba(239, 83, 80, 0.45);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, "Cascadia Code", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#__next,
+main {
+  height: 100%;
+}
+
+/* ─── Scrollbars ─── */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neutral);
+}
+
+/* ─── Selection ─── */
+::selection {
+  background: var(--highlight-dim);
+  color: var(--text-primary);
+}
+
+/* ─── Panel Base ─── */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg-panel-alt);
+  flex-shrink: 0;
+  min-height: 26px;
+}
+
+.panel-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.panel-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ─── TopBar ─── */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  height: 34px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+.topbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 6px;
+}
+
+/* ─── Buttons ─── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.1s;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.btn.active {
+  color: var(--text-primary);
+  background: var(--bg-active);
+  border-color: var(--border);
+}
+
+.btn-icon {
+  padding: 3px 6px;
+  border-radius: 3px;
+}
+
+/* ─── Select / Dropdown ─── */
+.select-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.terminal-select {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 3px 20px 3px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  outline: none;
+  transition: all 0.1s;
+}
+
+.terminal-select:hover,
+.terminal-select:focus {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.select-arrow {
+  position: absolute;
+  right: 5px;
+  pointer-events: none;
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+/* ─── Status Indicators ─── */
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.live {
+  background: var(--buy);
+  box-shadow: 0 0 4px var(--buy);
+}
+.status-dot.connecting {
+  background: #f5c842;
+  animation: pulse 1s ease infinite;
+}
+.status-dot.offline,
+.status-dot.error {
+  background: var(--neutral);
+}
+.status-dot.stale {
+  background: #ff8800;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ─── Number formatting ─── */
+.num-buy { color: var(--buy); }
+.num-sell { color: var(--sell); }
+.num-neutral { color: var(--text-secondary); }
+.num-muted { color: var(--text-muted); }
+
+/* ─── Canvas containers ─── */
+.canvas-container {
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+/* ─── Order Book ─── */
+.ob-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  position: relative;
+  cursor: default;
+}
+
+.ob-row:hover {
+  background: var(--bg-hover);
+}
+
+.ob-depth-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  opacity: 0.15;
+  pointer-events: none;
+}
+
+.ob-depth-bar.bid { background: var(--buy); }
+.ob-depth-bar.ask { background: var(--sell); }
+
+/* ─── Footprint cell ─── */
+.fp-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+/* ─── Tabs ─── */
+.tab-group {
+  display: flex;
+  gap: 1px;
+  background: var(--bg-base);
+  border-radius: 3px;
+  padding: 1px;
+}
+
+.tab {
+  padding: 2px 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.tab.active {
+  background: var(--bg-panel-alt);
+  color: var(--text-primary);
+}
+
+/* ─── Resizable grid ─── */
+.terminal-layout {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ─── Tag / badge ─── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 2px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.badge.buy {
+  background: var(--buy-bg);
+  color: var(--buy);
+  border: 1px solid var(--buy-border);
+}
+
+.badge.sell {
+  background: var(--sell-bg);
+  color: var(--sell);
+  border: 1px solid var(--sell-border);
 }
