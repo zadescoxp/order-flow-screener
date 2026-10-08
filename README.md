@@ -4,6 +4,8 @@
 
 > ⚡ Live footprint charts · Order book · OBI · Volume Profile · Depth of Market · Volatility Z-Score
 
+![Order Flow Tracker Demo](./demo.gif)
+
 ---
 
 ## What This Is
@@ -21,39 +23,6 @@ Users **observe**, **analyze**, **compare** and **screen** live market data.
 
 ---
 
-## Technology Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 16, React 19, TypeScript |
-| Styling | Tailwind CSS 4 |
-| State | Zustand (with subscribeWithSelector) |
-| Charts | Canvas / 2D rendering |
-| Data | Live WebSocket exchange feeds |
-| Testing | Jest + ts-jest |
-
----
-
-## Architecture
-
-```
-Exchange WebSockets
-        ↓
-Exchange Adapters (lib/adapters/)
-        ↓
-Normalized Market Data (lib/types/market.ts)
-        ↓
-Order Flow Engine (lib/engine/orderFlowEngine.ts)
-        ↓
-Market Data Manager (lib/managers/marketDataManager.ts)
-        ↓
-Zustand Store (lib/store/terminalStore.ts)
-        ↓
-React Components (components/)
-```
-
----
-
 ## Supported Exchanges
 
 ### Perpetuals
@@ -62,12 +31,18 @@ React Components (components/)
 | Binance Futures | ✅ Live |
 | Bybit Futures | ✅ Live |
 | OKX Futures | ✅ Live |
+| Bitget Futures | ✅ Live |
 | Hyperliquid | ✅ Live |
+| Deribit | ✅ Live |
 
 ### Spot
 | Exchange | Status |
 |----------|--------|
 | Binance Spot | ✅ Live |
+| Bybit Spot | ✅ Live |
+| OKX Spot | ✅ Live |
+| Bitget Spot | ✅ Live |
+| Coinbase Spot | ✅ Live |
 
 ---
 
@@ -91,35 +66,53 @@ React Components (components/)
 - Current OBI value: -1 (ask-heavy) → 0 (balanced) → +1 (bid-heavy)
 - Historical OBI chart with fill gradient
 
-### Volume Profile
+### Volume Profile & Trades Profile
 - Horizontal volume profile by price
 - Total / Buy / Sell / Delta tabs
 - POC, VAH, VAL identification
-- Synchronized with footprint crosshair
-
-### Trades Profile
 - Executed trade distribution by price
-- Volume / Trade count toggle
 
-### Depth of Market
+### Depth of Market & Volatility
 - Cumulative bid/ask depth curve
-- Crosshair synchronized
-
-### Volatility / Z-Score
 - Rolling Z-score of trade volume
 - Color-coded: ±1 (yellow), ±2 (orange), ±3 (red)
-- Volume Heatmap mode
 - Configurable rolling windows: 20, 50, 100, 200
 
-### Order Flow Analytics
-- Delta divergence detection (Price↑ + Delta↓ = observation)
-- Potential absorption detection
-- Stacked imbalance detection (configurable minimum levels)
-- Cumulative delta tracking
+![Order Flow Tracker Features](./features.gif)
 
 ---
 
-## Getting Started
+## How to Use It
+
+1. **Select an Asset and Venue:** Use the Top Bar to select whether you want to analyze Spot or Perpetual markets, select your target asset (e.g. BTCUSDT), and choose the specific exchange.
+2. **Customize Your Workspace:** Click on the tabs in the Top Bar to toggle modules on/off (Order Book, Volume Profile, OBI, Volatility, DOM).
+3. **Analyze Data:** Hover over any data point on the terminal—whether on the footprint chart, the DOM, or the profiles—to read a detailed tooltip explaining exactly what the data means.
+4. **Resize Panels:** Adjust the screen layout by dragging the borders between panels to fit your specific trading/screening setup.
+
+---
+
+## How to Contribute
+
+We welcome contributions from the community! If you're a developer or designer who wants to improve Order Flow Tracker:
+
+1. **Fork the Repository:** Start by forking the project to your own GitHub account.
+2. **Clone Locally:** `git clone https://github.com/your-username/order-flow-tracker.git`
+3. **Create a Branch:** Create a feature branch (`git checkout -b feature/amazing-feature`).
+4. **Make Changes:** Add your new exchange adapter, indicator, or UI improvement.
+5. **Run Tests:** Ensure you haven't broken the engine logic by running `npm test`.
+6. **Submit a Pull Request:** Push to your fork and submit a PR to the main repository.
+
+If you find a bug or have a feature request, please open an issue in the GitHub repository. 
+
+---
+
+## Future Updates 🚀
+
+We are actively working on this project! Order Flow Tracker is still evolving, and we will be introducing even more updates, features, and refinements in the future. Stay tuned for advanced cross-venue aggregation, more analytical modules, and further UI polish.
+
+---
+
+## Getting Started (Development)
 
 ```bash
 # Install dependencies
@@ -136,107 +129,14 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## Project Structure
+## Architecture & Tech Stack
+
+**Tech:** Next.js 16, React 19, TypeScript, Tailwind CSS 4, Zustand, Canvas API.
+**Data:** Live WebSocket exchange feeds normalized through our engine.
 
 ```
-order-flow-tracker/
-├── app/
-│   ├── layout.tsx          # Root layout
-│   ├── page.tsx            # Entry point → Terminal
-│   └── globals.css         # Terminal theme CSS
-├── components/
-│   ├── Terminal.tsx        # Main layout grid
-│   ├── TopBar.tsx          # Asset/timeframe/venue/profile selector
-│   ├── FootprintChart.tsx  # Canvas footprint renderer
-│   ├── VolumeProfile.tsx   # Canvas volume profile
-│   ├── OrderBook.tsx       # Live order book panel
-│   ├── OBIPanel.tsx        # OBI value + history chart
-│   ├── DepthOfMarket.tsx   # Cumulative depth chart
-│   ├── VolatilityPanel.tsx # Z-score + heatmap
-│   ├── TradesProfile.tsx   # Trades distribution profile
-│   └── ConnectionStatus.tsx # Per-venue status dots
-├── lib/
-│   ├── types/
-│   │   └── market.ts       # All normalized types
-│   ├── adapters/
-│   │   ├── base.ts         # Abstract exchange adapter
-│   │   ├── binanceFutures.ts
-│   │   └── exchanges.ts    # Bybit, OKX, Hyperliquid, Binance Spot
-│   ├── engine/
-│   │   └── orderFlowEngine.ts  # Core footprint engine
-│   ├── managers/
-│   │   └── marketDataManager.ts  # Adapter lifecycle manager
-│   └── store/
-│       └── terminalStore.ts  # Zustand store
-├── hooks/
-│   └── useMarketData.ts    # Market data subscription hook
-└── __tests__/
-    └── orderFlowEngine.test.ts  # 33 unit tests
+Exchange WebSockets → Exchange Adapters → Order Flow Engine → Zustand Store → React Components
 ```
-
----
-
-## Data Normalization
-
-Every exchange adapter transforms native messages into:
-
-```typescript
-interface NormalizedTrade {
-  id: string
-  venue: Venue
-  symbol: string
-  timestamp: number      // exchange timestamp
-  localTimestamp: number // receive timestamp
-  price: number
-  quantity: number
-  quoteVolume: number
-  side: "buy" | "sell"  // aggressor side
-  marketType: "spot" | "perpetual"
-  sequence?: number
-}
-```
-
----
-
-## Trade Classification
-
-Exchange-provided aggressor side is used when available. Tick-rule fallback:
-
-```
-price > prevPrice → buy
-price < prevPrice → sell
-price = prevPrice → previous direction
-```
-
----
-
-## Unit Tests
-
-```bash
-npm test
-```
-
-**33 tests covering:**
-- Trade classification (tick-rule)
-- Price tick rounding
-- Candle open time bucketing
-- Delta computation (buy/sell/mixed)
-- OBI formula (edge cases)
-- Imbalance detection (3x threshold, custom threshold)
-- Stacked imbalance detection
-- Z-score calculation
-- Volume profile (POC, VAH, VAL, delta)
-- Cross-candle price-level aggregation
-
----
-
-## Critical Rules
-
-1. This is a **screening and analytics** application only — no trade execution
-2. All data comes from **live exchange WebSockets** — no mock data
-3. Exchange-specific parsing is **isolated inside adapters** — never in React components
-4. The footprint chart represents **actual executed trades** aggregated by price and time
-5. Stale/disconnected data is **never silently displayed**
 
 ---
 
