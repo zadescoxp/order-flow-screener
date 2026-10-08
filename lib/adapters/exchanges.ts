@@ -179,7 +179,7 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
       this.reconnectAttempts = 0;
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId: this.symbol }, { channel: "books50-l2-tbt", instId: this.symbol }] }));
+      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId: this.symbol }, { channel: "books5", instId: this.symbol }] }));
       this.startPing(25_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -204,11 +204,11 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
         const price = parseFloat(t.px), qty = parseFloat(t.sz);
         this.emitTrade({ id: `okx-${t.tradeId}`, venue: this.venue, symbol: t.instId, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side, marketType: "perpetual" });
       }
-    } else if (msg.arg.channel === "books50-l2-tbt") {
-      for (const d of msg.data as Array<{ bids: [string, string, string, string][]; asks: [string, string, string, string][]; ts: string; action?: string }>) {
-        if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
-        for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
-        for (const [p, q] of d.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
+    } else if (msg.arg.channel === "books5") {
+      for (const d of msg.data as Array<{ bids: [string, string, string, string][]; asks: [string, string, string, string][]; ts: string }>) {
+        this.bids.clear(); this.asks.clear();
+        for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
+        for (const [p, q] of d.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(price, qty); }
         emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
       }
     }
@@ -247,7 +247,7 @@ export class OKXSpotAdapter extends BaseExchangeAdapter {
       this.reconnectAttempts = 0;
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId: this.symbol }, { channel: "books50-l2-tbt", instId: this.symbol }] }));
+      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId: this.symbol }, { channel: "books5", instId: this.symbol }] }));
       this.startPing(25_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -272,11 +272,11 @@ export class OKXSpotAdapter extends BaseExchangeAdapter {
         const price = parseFloat(t.px), qty = parseFloat(t.sz);
         this.emitTrade({ id: `okxs-${t.tradeId}`, venue: this.venue, symbol: t.instId, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side, marketType: "spot" });
       }
-    } else if (msg.arg.channel === "books50-l2-tbt") {
-      for (const d of msg.data as Array<{ bids: [string, string, string, string][]; asks: [string, string, string, string][]; ts: string; action?: string }>) {
-        if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
-        for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
-        for (const [p, q] of d.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
+    } else if (msg.arg.channel === "books5") {
+      for (const d of msg.data as Array<{ bids: [string, string, string, string][]; asks: [string, string, string, string][]; ts: string }>) {
+        this.bids.clear(); this.asks.clear();
+        for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
+        for (const [p, q] of d.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(price, qty); }
         emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
       }
     }
@@ -293,15 +293,12 @@ export class OKXSpotAdapter extends BaseExchangeAdapter {
 // ============================================================
 export class BinanceSpotAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "binance-spot";
-  private readonly BASE_WS = "wss://stream.binance.com:9443/stream";
+  private readonly BASE_WS = "wss://stream.binance.com:9443/ws";
   private bids = new Map<number, number>();
   private asks = new Map<number, number>();
-  private lastUpdateId = 0;
-  private snapshotLoaded = false;
-  private pendingUpdates: Array<{ U: number; u: number; b: [string, string][]; a: [string, string][] }> = [];
 
   constructor(symbol: string) { super(symbol.toUpperCase()); }
-  protected buildWsUrl(): string { return `${this.BASE_WS}?streams=${this.symbol.toLowerCase()}@aggTrade/${this.symbol.toLowerCase()}@depth@100ms`; }
+  protected buildWsUrl(): string { return this.BASE_WS; }
 
   connect(): void {
     this.setStatus("connecting");
@@ -311,51 +308,30 @@ export class BinanceSpotAdapter extends BaseExchangeAdapter {
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
       this.startPing(10_000);
-      this.loadSnapshot();
+      const s = this.symbol.toLowerCase();
+      this.ws!.send(JSON.stringify({ method: "SUBSCRIBE", params: [`${s}@depth50`, `${s}@trade`], id: 1 }));
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
-      try { const m = JSON.parse(e.data as string); if (m.stream && m.data) this.handleMessage(m.data); } catch { /**/ }
+      try { this.handleMessage(JSON.parse(e.data as string)); } catch { /**/ }
     };
     this.ws.onerror = () => this.setStatus("error");
     this.ws.onclose = () => { this.stopPing(); if (this.status !== "offline") { this.setStatus("connecting"); this.reconnect(); } };
   }
 
-  disconnect(): void { this.setStatus("offline"); this.stopPing(); this.ws?.close(); this.ws = null; this.snapshotLoaded = false; this.pendingUpdates = []; }
+  disconnect(): void { this.setStatus("offline"); this.stopPing(); this.ws?.close(); this.ws = null; }
 
   protected handleMessage(raw: unknown): void {
-    const msg = raw as { e: string };
-    if (msg.e === "aggTrade") {
-      const t = raw as { a: number; T: number; s: string; p: string; q: string; m: boolean };
-      const price = parseFloat(t.p), qty = parseFloat(t.q);
-      this.emitTrade({ id: `bs-${t.a}`, venue: this.venue, symbol: t.s, timestamp: t.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.m ? "sell" : "buy", marketType: "spot", sequence: t.a });
-    } else if (msg.e === "depthUpdate") {
-      const d = raw as { U: number; u: number; b: [string, string][]; a: [string, string][] };
-      if (!this.snapshotLoaded) { this.pendingUpdates.push(d); return; }
-      this.applyDepth(d);
-    }
-  }
-
-  private applyDepth(d: { U: number; u: number; b: [string, string][]; a: [string, string][] }): void {
-    for (const [p, q] of d.b) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
-    for (const [p, q] of d.a) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
-    this.lastUpdateId = d.u;
-    emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
-  }
-
-  private async loadSnapshot(): Promise<void> {
-    try {
-      const res = await fetch(`https://api.binance.com/api/v3/depth?symbol=${this.symbol}&limit=1000`);
-      const data = await res.json() as { lastUpdateId: number; bids: [string, string][]; asks: [string, string][] };
+    const msg = raw as any;
+    if (msg.e === "trade") {
+      const price = parseFloat(msg.p), qty = parseFloat(msg.q);
+      this.emitTrade({ id: `bs-${msg.t}`, venue: this.venue, symbol: msg.s, timestamp: msg.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: msg.m ? "sell" : "buy", marketType: "spot", sequence: msg.t });
+    } else if (msg.lastUpdateId && msg.bids && msg.asks) {
       this.bids.clear(); this.asks.clear();
-      for (const [p, q] of data.bids) { const pr = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(pr, qty); }
-      for (const [p, q] of data.asks) { const pr = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(pr, qty); }
-      this.lastUpdateId = data.lastUpdateId;
-      this.snapshotLoaded = true;
-      for (const u of this.pendingUpdates) { if (u.u > this.lastUpdateId) this.applyDepth(u); }
-      this.pendingUpdates = [];
+      for (const [p, q] of msg.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
+      for (const [p, q] of msg.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(price, qty); }
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
-    } catch { setTimeout(() => this.loadSnapshot(), 5000); }
+    }
   }
 
   protected sendPing(): void { if (Date.now() - this.lastHeartbeat > this.staleThresholdMs) this.setStatus("stale"); }
@@ -435,9 +411,8 @@ export class BitgetFuturesAdapter extends BaseExchangeAdapter {
   private asks = new Map<number, number>();
 
   constructor(symbol: string) {
-    // BTCUSDT → BTCUSDT_UMCBL (Bitget USDT perpetual)
     let s = symbol.toUpperCase();
-    if (!s.includes("_")) s = `${s}_UMCBL`;
+    if (s.includes("_UMCBL")) s = s.replace("_UMCBL", "");
     super(s);
   }
 
@@ -450,9 +425,9 @@ export class BitgetFuturesAdapter extends BaseExchangeAdapter {
       this.reconnectAttempts = 0;
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
-      const instType = "UMCBL";
+      const instType = "USDT-FUTURES";
       const instId = this.symbol;
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ instType, channel: "trade", instId }, { instType, channel: "books50", instId }] }));
+      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ instType, channel: "trade", instId }, { instType, channel: "books", instId }] }));
       this.startPing(25_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -479,7 +454,7 @@ export class BitgetFuturesAdapter extends BaseExchangeAdapter {
         const price = parseFloat(px), qty = parseFloat(sz);
         this.emitTrade({ id: `bg-${ts}`, venue: this.venue, symbol: this.symbol, timestamp: parseInt(ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: side === "buy" ? "buy" : "sell", marketType: "perpetual" });
       }
-    } else if (msg.arg.channel === "books50") {
+    } else if (msg.arg.channel === "books") {
       if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
       for (const d of msg.data as Array<{ bids: [string, string][]; asks: [string, string][] }>) {
         for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
@@ -514,7 +489,7 @@ export class BitgetSpotAdapter extends BaseExchangeAdapter {
       this.reconnectAttempts = 0;
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ instType: "SPOT", channel: "trade", instId: this.symbol }, { instType: "SPOT", channel: "books50", instId: this.symbol }] }));
+      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ instType: "SPOT", channel: "trade", instId: this.symbol }, { instType: "SPOT", channel: "books", instId: this.symbol }] }));
       this.startPing(25_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -540,7 +515,7 @@ export class BitgetSpotAdapter extends BaseExchangeAdapter {
         const price = parseFloat(px), qty = parseFloat(sz);
         this.emitTrade({ id: `bgs-${ts}`, venue: this.venue, symbol: this.symbol, timestamp: parseInt(ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: side === "buy" ? "buy" : "sell", marketType: "spot" });
       }
-    } else if (msg.arg.channel === "books50") {
+    } else if (msg.arg.channel === "books") {
       if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
       for (const d of msg.data as Array<{ bids: [string, string][]; asks: [string, string][] }>) {
         for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
@@ -657,7 +632,7 @@ export class DeribitAdapter extends BaseExchangeAdapter {
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
       // Subscribe to trades
-      this.send({ jsonrpc: "2.0", id: this.reqId++, method: "public/subscribe", params: { channels: [`trades.${this.symbol}.100ms`, `book.${this.symbol}.100ms`] } });
+      this.send({ jsonrpc: "2.0", id: this.reqId++, method: "public/subscribe", params: { channels: [`trades.${this.symbol}.100ms`, `book.${this.symbol}.none.20.100ms`] } });
       this.startPing(15_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
