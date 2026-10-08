@@ -136,7 +136,7 @@ const INITIAL_SETTINGS: TerminalSettings = {
   imbalanceThreshold: 3,
   stackedImbalanceLevels: 3,
   zScoreWindow: 20,
-  orderBookMode: "aggregated",
+  orderBookMode: "single",
   panels: PROFILE_PANELS["order-flow"],
 };
 

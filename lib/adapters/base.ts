@@ -17,7 +17,7 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
   protected pingInterval: ReturnType<typeof setInterval> | null = null;
   protected lastHeartbeat = 0;
   protected staleThresholdMs = 30_000;
-  protected symbol: string;
+  public symbol: string;
   protected status: VenueConnection["status"] = "connecting";
 
   constructor(symbol: string) {

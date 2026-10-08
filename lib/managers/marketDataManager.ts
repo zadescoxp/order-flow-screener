@@ -6,8 +6,7 @@
 
 "use client";
 
-import { BinanceFuturesAdapter } from "@/lib/adapters/binanceFutures";
-import { BybitFuturesAdapter, OKXFuturesAdapter, BinanceSpotAdapter, HyperliquidAdapter } from "@/lib/adapters/exchanges";
+import { createAdapter } from "@/lib/adapters/exchanges";
 import type { BaseExchangeAdapter } from "@/lib/adapters/base";
 import {
   getCandleOpenTime,
@@ -114,24 +113,10 @@ class MarketDataManager {
     symbol: string,
     _marketType: MarketType
   ): BaseExchangeAdapter | null {
-    switch (venue) {
-      case "binance-futures":
-        return new BinanceFuturesAdapter(symbol);
-      case "bybit-futures":
-        return new BybitFuturesAdapter(symbol);
-      case "okx-futures":
-        return new OKXFuturesAdapter(this.toOKXSymbol(symbol, "perpetual"));
-      case "binance-spot":
-        return new BinanceSpotAdapter(symbol);
-      case "hyperliquid":
-        return new HyperliquidAdapter(symbol.replace("USDT", ""));
-      default:
-        return null;
-    }
+    return createAdapter(venue, symbol);
   }
 
   private toOKXSymbol(symbol: string, type: "perpetual" | "spot"): string {
-    // BTCUSDT → BTC-USDT-SWAP
     const base = symbol.replace("USDT", "").replace("USD", "");
     if (type === "perpetual") return `${base}-USDT-SWAP`;
     return `${base}-USDT`;
