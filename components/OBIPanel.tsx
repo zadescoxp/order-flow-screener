@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useCallback } from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
+import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── OBI Panel (Order Book Imbalance) ───────────────────────────
 // Displays current OBI value + historical OBI chart
@@ -120,6 +121,28 @@ export default function OBIPanel() {
     return () => obs.disconnect();
   }, [draw]);
 
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas || obiHistory.length < 2) { hideTooltip(); return; }
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const data = obiHistory.slice(-Math.floor(canvas.width / 2));
+    const step = canvas.width / data.length;
+    const index = Math.min(data.length - 1, Math.floor(x / step));
+    const point = data[index];
+    if (point) {
+      const obi = point.value;
+      const direction = obi > 0.2 ? "Bullish (more bid liquidity)" : obi < -0.2 ? "Bearish (more ask liquidity)" : "Neutral";
+      showTooltip(
+        `OBI: ${obi.toFixed(3)}`,
+        `Direction: ${direction}\nTime: ${new Date(point.timestamp).toLocaleTimeString()}\n\nWhat this means: Order Book Imbalance (OBI) measures the ratio of bid vs ask quantity near the top of the book. Values near +1 mean strong buying pressure, near -1 mean strong selling pressure.`,
+        e
+      );
+    } else {
+      hideTooltip();
+    }
+  }, [obiHistory]);
+
   const obiColor =
     currentOBI > 0.2
       ? "var(--buy)"
@@ -143,7 +166,12 @@ export default function OBIPanel() {
         </span>
       </div>
       <div ref={containerRef} className="panel-content">
-        <canvas ref={canvasRef} style={{ display: "block" }} />
+        <canvas
+          ref={canvasRef}
+          style={{ display: "block", cursor: "crosshair" }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={hideTooltip}
+        />
       </div>
     </div>
   );
