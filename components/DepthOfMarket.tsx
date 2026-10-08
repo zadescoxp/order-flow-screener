@@ -172,20 +172,16 @@ export default function DepthOfMarket() {
     // Legend
     const bidTotal = cumBid;
     const askTotal = cumAsk;
+    const fmt = (v: number) =>
+      v >= 1_000_000 ? (v / 1_000_000).toFixed(2) + "M"
+      : v >= 1_000   ? (v / 1_000).toFixed(2) + "K"
+      : v.toFixed(4);
     ctx.font = "9px monospace";
     ctx.textAlign = "left";
     ctx.fillStyle = "#26a69a";
-    ctx.fillText(
-      `■ Bids ${bidTotal >= 1e6 ? (bidTotal / 1e6).toFixed(1) + "M" : (bidTotal / 1000).toFixed(0) + "K"}`,
-      4,
-      12
-    );
+    ctx.fillText(`■ Bids ${fmt(bidTotal)}`, 4, 12);
     ctx.fillStyle = "#ef5350";
-    ctx.fillText(
-      `■ Asks ${askTotal >= 1e6 ? (askTotal / 1e6).toFixed(1) + "M" : (askTotal / 1000).toFixed(0) + "K"}`,
-      4,
-      22
-    );
+    ctx.fillText(`■ Asks ${fmt(askTotal)}`, 4, 22);
   }, [orderBook, crosshairPrice, ticker]);
 
   useEffect(() => {
