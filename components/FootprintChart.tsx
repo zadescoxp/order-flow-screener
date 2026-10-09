@@ -48,10 +48,11 @@ export default function FootprintChart({ height }: FootprintChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef(0);
+  const scrollYRef = useRef(0);
   const zoomRef = useRef(20); // adjustable LEVEL_HEIGHT
   const isLockedToRightRef = useRef(true);
   const isDraggingRef = useRef(false);
-  const dragStartRef = useRef({ x: 0, scroll: 0 });
+  const dragStartRef = useRef({ x: 0, y: 0, scroll: 0, scrollY: 0 });
 
   const candles = useTerminalStore((s) => s.candles);
   const currentCandle = useTerminalStore((s) => s.currentCandle);
@@ -93,9 +94,12 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     const totalHeight = sortedPrices.length * LEVEL_HEIGHT;
     const chartH = H - BOTTOM_TABLE_HEIGHT;
 
-    // Center the prices initially if we don't have Y-scroll, but let's just draw from topOffset
-    // For a real app, Y-scroll is needed, but we'll stick to basic top-down for now.
-    const topOffset = Math.max(0, (chartH - totalHeight) / 2); // Center vertically if it fits
+    // Center vertically if it fits, otherwise allow scrolling
+    const baseTopOffset = Math.max(0, (chartH - totalHeight) / 2);
+    const maxScrollY = Math.max(0, totalHeight - chartH + 40);
+    const scrollY = Math.min(Math.max(0, scrollYRef.current), maxScrollY);
+    scrollYRef.current = scrollY;
+    const topOffset = baseTopOffset - scrollY;
 
     const totalWidth = allCandles.length * CANDLE_WIDTH + PRICE_COL_WIDTH + 150; // extra padding on right
     const maxScroll = Math.max(0, totalWidth - W + PRICE_COL_WIDTH);
@@ -320,8 +324,9 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         const zoomDelta = e.deltaY * -0.05;
         zoomRef.current = Math.min(Math.max(10, zoomRef.current + zoomDelta), 50);
       } else {
-        // Pan X axis
-        scrollRef.current += e.deltaX || e.deltaY * 0.5;
+        // Pan X and Y axis
+        scrollRef.current += e.deltaX;
+        scrollYRef.current += e.deltaY;
         isLockedToRightRef.current = false;
       }
       draw();
@@ -332,7 +337,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     isDraggingRef.current = true;
     isLockedToRightRef.current = false;
-    dragStartRef.current = { x: e.clientX, scroll: scrollRef.current };
+    dragStartRef.current = { x: e.clientX, y: e.clientY, scroll: scrollRef.current, scrollY: scrollYRef.current };
   }, []);
 
   const handleMouseMove = useCallback(
@@ -342,7 +347,9 @@ export default function FootprintChart({ height }: FootprintChartProps) {
 
       if (isDraggingRef.current) {
         const dx = e.clientX - dragStartRef.current.x;
+        const dy = e.clientY - dragStartRef.current.y;
         scrollRef.current = dragStartRef.current.scroll - dx;
+        scrollYRef.current = dragStartRef.current.scrollY - dy;
         draw();
         hideTooltip();
         return;
@@ -370,7 +377,10 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         }
         const sortedPrices = [...allPrices].sort((a, b) => b - a);
         const totalHeight = sortedPrices.length * LEVEL_HEIGHT;
-        const topOffset = Math.max(0, (chartH - totalHeight) / 2);
+        const baseTopOffset = Math.max(0, (chartH - totalHeight) / 2);
+        const maxScrollY = Math.max(0, totalHeight - chartH + 40);
+        const scrollY = Math.min(Math.max(0, scrollYRef.current), maxScrollY);
+        const topOffset = baseTopOffset - scrollY;
         
         // Are we in the bottom table area?
         if (y >= chartH) {
