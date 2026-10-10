@@ -3,6 +3,17 @@
 import React from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
 import type { Venue, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
+import type { Theme } from "@/lib/theme";
+
+// ─── Theme options ───────────────────────────────────────────
+const THEMES: { value: Theme; label: string }[] = [
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+  { value: "forest", label: "Forest" },
+  { value: "futuristic", label: "Futuristic" },
+  { value: "dark-dull", label: "Dark Dull" },
+  { value: "light-dull", label: "Light Dull" },
+];
 
 // ─── Asset options ───────────────────────────────────────────
 const ASSETS_PERP = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT", "LINKUSDT", "ARBUSDT", "OPUSDT"];
@@ -85,6 +96,8 @@ export default function TopBar() {
   const setMarketType = useTerminalStore((s) => s.setMarketType);
   const setTimeframe = useTerminalStore((s) => s.setTimeframe);
   const setToolProfile = useTerminalStore((s) => s.setToolProfile);
+  const theme = useTerminalStore((s) => s.theme);
+  const setTheme = useTerminalStore((s) => s.setTheme);
 
   const assets = marketType === "perpetual" ? ASSETS_PERP : ASSETS_SPOT;
   const venues = marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
@@ -237,6 +250,29 @@ export default function TopBar() {
             </button>
           );
         })}
+      </div>
+
+      <div className="topbar-sep" />
+
+      {/* ── Theme ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 10, color: "var(--text-muted)", letterSpacing: "0.05em" }}>🎨</span>
+        <div className="select-wrap">
+          <select
+            className="terminal-select"
+            value={theme}
+            onChange={(e) => setTheme(e.target.value as Theme)}
+            id="theme-selector"
+            style={{ color: "var(--text-accent)", fontWeight: 600 }}
+          >
+            {THEMES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+          <span className="select-arrow">▾</span>
+        </div>
       </div>
 
       {/* ── Connection status (right-aligned) ── */}
