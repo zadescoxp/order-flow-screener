@@ -351,3 +351,110 @@ main {
   color: var(--sell);
   border: 1px solid var(--sell-border);
 }
+
+/* ─── Themes ─── */
+
+/* LIGHT */
+html[data-theme="light"] {
+  --bg-base: #f0f0f5;
+  --bg-surface: #ffffff;
+  --bg-panel: #f8f8fc;
+  --bg-panel-alt: #f4f4f8;
+  --bg-hover: #e8e8f0;
+  --bg-active: #e0e0ec;
+
+  --border: #d0d0e0;
+  --border-muted: #e0e0ec;
+
+  --text-primary: #1a1a24;
+  --text-secondary: #5a5a75;
+  --text-muted: #8a8aa5;
+  --text-accent: #666699;
+
+  --buy: #26a69a;
+  --sell: #ef5350;
+}
+
+/* FOREST */
+html[data-theme="forest"] {
+  --bg-base: #06120b;
+  --bg-surface: #0a1a10;
+  --bg-panel: #0d2114;
+  --bg-panel-alt: #0f2617;
+  --bg-hover: #14331f;
+  --bg-active: #194026;
+
+  --border: #1f4028;
+  --border-muted: #142b1a;
+
+  --text-primary: #d4f0df;
+  --text-secondary: #8bc2a2;
+  --text-muted: #5e8a71;
+  --text-accent: #a3d9b8;
+
+  --buy: #4caf50;
+  --sell: #ff5252;
+}
+
+/* FUTURISTIC */
+html[data-theme="futuristic"] {
+  --bg-base: #050514;
+  --bg-surface: #0a0a20;
+  --bg-panel: #0c0c2a;
+  --bg-panel-alt: #101033;
+  --bg-hover: #1a1a4c;
+  --bg-active: #222266;
+
+  --border: #2b2b66;
+  --border-muted: #1a1a4c;
+
+  --text-primary: #e6e6ff;
+  --text-secondary: #9999ff;
+  --text-muted: #6666cc;
+  --text-accent: #b3b3ff;
+
+  --buy: #00ffff;
+  --sell: #ff00ff;
+}
+
+/* DARK DULL */
+html[data-theme="dark-dull"] {
+  --bg-base: #1e1e1e;
+  --bg-surface: #252526;
+  --bg-panel: #2d2d30;
+  --bg-panel-alt: #333333;
+  --bg-hover: #3e3e42;
+  --bg-active: #4d4d50;
+
+  --border: #404040;
+  --border-muted: #303030;
+
+  --text-primary: #cccccc;
+  --text-secondary: #999999;
+  --text-muted: #666666;
+  --text-accent: #bbbbbb;
+
+  --buy: #5a8a65;
+  --sell: #a65a5a;
+}
+
+/* LIGHT DULL */
+html[data-theme="light-dull"] {
+  --bg-base: #e6e6e6;
+  --bg-surface: #f0f0f0;
+  --bg-panel: #dcdcdc;
+  --bg-panel-alt: #d3d3d3;
+  --bg-hover: #cccccc;
+  --bg-active: #c0c0c0;
+
+  --border: #b0b0b0;
+  --border-muted: #c8c8c8;
+
+  --text-primary: #333333;
+  --text-secondary: #555555;
+  --text-muted: #777777;
+  --text-accent: #444444;
+
+  --buy: #658a6a;
+  --sell: #a66565;
+}
