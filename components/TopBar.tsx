@@ -258,7 +258,7 @@ export default function TopBar() {
           𝕏 @zadescoxp
         </a>
         <a
-          href="https://github.com"
+          href="https://github.com/zadescoxp/order-flow-screener"
           target="_blank"
           rel="noopener noreferrer"
           className="btn"
