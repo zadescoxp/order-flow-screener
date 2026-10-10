@@ -4,6 +4,7 @@
 
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
+import { type Theme, applyTheme } from "@/lib/theme";
 import type {
   Venue,
   MarketType,
@@ -37,6 +38,7 @@ export interface TerminalSettings {
   zScoreWindow: number;
   orderBookMode: "single" | "aggregated" | "compact";
   panels: PanelVisibility;
+  theme: Theme;
 }
 
 // ----------------------------------------------------------
@@ -73,6 +75,7 @@ export interface TerminalActions {
   setImbalanceThreshold: (t: number) => void;
   setOrderBookMode: (m: "single" | "aggregated" | "compact") => void;
   setPanelVisible: (panel: keyof PanelVisibility, visible: boolean) => void;
+  setTheme: (theme: Theme) => void;
 
   // Market data mutations
   pushTrade: (trade: NormalizedTrade) => void;
@@ -138,6 +141,7 @@ const INITIAL_SETTINGS: TerminalSettings = {
   zScoreWindow: 20,
   orderBookMode: "single",
   panels: PROFILE_PANELS["order-flow"],
+  theme: "dark",
 };
 
 const INITIAL_MARKET: MarketDataState = {
@@ -200,6 +204,11 @@ export const useTerminalStore = create<TerminalStore>()(
       set((s) => ({
         panels: { ...s.panels, [panel]: visible },
       })),
+
+    setTheme: (theme) => {
+      applyTheme(theme);
+      set({ theme });
+    },
 
     // --- Market Data ---
     pushTrade: (trade) =>

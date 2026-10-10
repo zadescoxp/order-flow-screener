@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useRef, useCallback } from "react";
+import React, { useRef, useCallback, useLayoutEffect } from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
 import { useMarketData } from "@/hooks/useMarketData";
+import { applyTheme } from "@/lib/theme";
 import TopBar from "@/components/TopBar";
 import FootprintChart from "@/components/FootprintChart";
 import VolumeProfilePanel from "@/components/VolumeProfile";
@@ -20,6 +21,12 @@ export default function Terminal() {
   useMarketData();
 
   const panels = useTerminalStore((s) => s.panels);
+  const theme = useTerminalStore((s) => s.theme);
+
+  // Apply theme immediately before paint — directly sets CSS vars on :root
+  useLayoutEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   return (
     <div
