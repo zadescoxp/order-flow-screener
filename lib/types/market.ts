@@ -201,6 +201,7 @@ export interface AggregatedOrderBook {
 // ----------------------------------------------------------
 export type ToolProfile = "order-flow" | "liquidity" | "volatility";
 
+
 export interface PanelVisibility {
   volumeProfile: boolean;
   footprint: boolean;
