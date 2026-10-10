@@ -35,6 +35,7 @@ export default function VolatilityPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
   const zScoreHistory = useTerminalStore((s) => s.zScoreHistory);
   const crosshairTime = useTerminalStore((s) => s.crosshairTime);
+  const theme = useTerminalStore((s) => s.theme);
   const [tab, setTab] = useState<ZTab>("zscore");
   const [window, setWindow] = useState<ZWindow>(20);
 
@@ -48,11 +49,28 @@ export default function VolatilityPanel() {
     const W = canvas.width;
     const H = canvas.height;
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#0a0a0c";
+
+    const cs = getComputedStyle(document.documentElement);
+    const bgBase    = cs.getPropertyValue("--bg-base").trim()       || "#0a0a0c";
+    const textMuted  = cs.getPropertyValue("--text-muted").trim()   || "#4a4a66";
+    const border     = cs.getPropertyValue("--border").trim()        || "#2a2a3a";
+    const borderMuted = cs.getPropertyValue("--border-muted").trim() || "#161620";
+    const buy        = cs.getPropertyValue("--buy").trim()           || "#26a69a";
+    const sell       = cs.getPropertyValue("--sell").trim()          || "#ef5350";
+    const highlight  = cs.getPropertyValue("--highlight").trim()     || "#7c6af5";
+    const neutral    = cs.getPropertyValue("--neutral").trim()       || "#5c5c80";
+
+    const hex2rgba = (hex: string, a: number) => {
+      if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
+      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+      return `rgba(${r},${g},${b},${a})`;
+    };
+
+    ctx.fillStyle = bgBase;
     ctx.fillRect(0, 0, W, H);
 
     if (zScoreHistory.length < 2) {
-      ctx.fillStyle = "#4a4a66";
+      ctx.fillStyle = textMuted;
       ctx.font = "10px monospace";
       ctx.textAlign = "center";
       ctx.fillText("Waiting for trade data…", W / 2, H / 2);
@@ -65,11 +83,10 @@ export default function VolatilityPanel() {
     const yScale = (H / 2 - 10) / 3;
 
     if (tab === "zscore") {
-      // Horizontal grid lines
       for (const level of Z_LEVELS) {
         const y = zeroY - level.value * yScale;
         if (y < 0 || y > H) continue;
-        ctx.strokeStyle = Math.abs(level.value) >= 2 ? "#2a2a3a" : "#161620";
+        ctx.strokeStyle = Math.abs(level.value) >= 2 ? border : borderMuted;
         ctx.lineWidth = Math.abs(level.value) === 3 ? 0.8 : 0.5;
         ctx.setLineDash(level.value !== 0 ? [4, 3] : []);
         ctx.beginPath();
@@ -77,15 +94,12 @@ export default function VolatilityPanel() {
         ctx.lineTo(W, y);
         ctx.stroke();
         ctx.setLineDash([]);
-
-        // Labels
-        ctx.fillStyle = "#3a3a55";
+        ctx.fillStyle = neutral;
         ctx.font = "8px monospace";
         ctx.textAlign = "left";
         ctx.fillText(level.label, 2, y - 1);
       }
 
-      // Fill area
       ctx.beginPath();
       ctx.moveTo(0, zeroY);
       for (let i = 0; i < data.length; i++) {
@@ -96,13 +110,12 @@ export default function VolatilityPanel() {
       ctx.lineTo((data.length - 1) * step, zeroY);
       ctx.closePath();
       const grad = ctx.createLinearGradient(0, 0, 0, H);
-      grad.addColorStop(0, "rgba(124,106,245,0.2)");
-      grad.addColorStop(0.5, "rgba(124,106,245,0.05)");
-      grad.addColorStop(1, "rgba(124,106,245,0.0)");
+      grad.addColorStop(0, hex2rgba(highlight, 0.2));
+      grad.addColorStop(0.5, hex2rgba(highlight, 0.05));
+      grad.addColorStop(1, hex2rgba(highlight, 0));
       ctx.fillStyle = grad;
       ctx.fill();
 
-      // Z-score line (color-coded)
       for (let i = 1; i < data.length; i++) {
         const x0 = (i - 1) * step;
         const x1 = i * step;
@@ -116,20 +129,15 @@ export default function VolatilityPanel() {
         ctx.stroke();
       }
     } else {
-      // Volume Heatmap
       for (let i = 0; i < data.length; i++) {
         const x = i * step;
         const z = data[i].value;
         const intensity = Math.min(1, Math.abs(z) / 3);
-        const r = z >= 0 ? 38 : 239;
-        const g = z >= 0 ? 166 : 83;
-        const b = z >= 0 ? 154 : 80;
-        ctx.fillStyle = `rgba(${r},${g},${b},${intensity * 0.8})`;
+        ctx.fillStyle = hex2rgba(z >= 0 ? buy : sell, intensity * 0.8);
         ctx.fillRect(x, 0, step + 1, H);
       }
     }
 
-    // Crosshair sync
     if (crosshairTime !== null && data.length > 0) {
       const first = data[0].timestamp;
       const last = data[data.length - 1].timestamp;
@@ -137,7 +145,7 @@ export default function VolatilityPanel() {
       if (range > 0) {
         const cx = ((crosshairTime - first) / range) * W;
         if (cx >= 0 && cx <= W) {
-          ctx.strokeStyle = "rgba(255,255,255,0.15)";
+          ctx.strokeStyle = hex2rgba(textMuted, 0.4);
           ctx.lineWidth = 0.5;
           ctx.beginPath();
           ctx.moveTo(cx, 0);
@@ -146,7 +154,7 @@ export default function VolatilityPanel() {
         }
       }
     }
-  }, [zScoreHistory, tab, crosshairTime]);
+  }, [zScoreHistory, tab, crosshairTime, theme]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
