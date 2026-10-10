@@ -13,6 +13,7 @@ export default function VolumeProfilePanel() {
   const containerRef = useRef<HTMLDivElement>(null);
   const volumeProfile = useTerminalStore((s) => s.volumeProfile);
   const crosshairPrice = useTerminalStore((s) => s.crosshairPrice);
+  const theme = useTerminalStore((s) => s.theme);
   const activeTab = React.useRef<"total" | "buy" | "sell" | "delta">("total");
   const [tab, setTab] = React.useState<"total" | "buy" | "sell" | "delta">("total");
 
@@ -26,21 +27,38 @@ export default function VolumeProfilePanel() {
     const W = canvas.width;
     const H = canvas.height;
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#0f0f12";
+
+    // Read CSS vars so theme changes are reflected immediately
+    const cs = getComputedStyle(document.documentElement);
+    const bgPanel   = cs.getPropertyValue("--bg-surface").trim() || "#0f0f12";
+    const textMuted  = cs.getPropertyValue("--text-muted").trim()  || "#4a4a66";
+    const textSec    = cs.getPropertyValue("--text-secondary").trim() || "#7a7a99";
+    const buy        = cs.getPropertyValue("--buy").trim()          || "#26a69a";
+    const sell       = cs.getPropertyValue("--sell").trim()         || "#ef5350";
+    const highlight  = cs.getPropertyValue("--highlight").trim()    || "#7c6af5";
+    const poc        = cs.getPropertyValue("--poc").trim()           || "#f5c842";
+    const borderMuted = cs.getPropertyValue("--border-muted").trim() || "#13131a";
+
+    const hex2rgba = (hex: string, a: number) => {
+      if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
+      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+      return `rgba(${r},${g},${b},${a})`;
+    };
+
+    ctx.fillStyle = bgPanel;
     ctx.fillRect(0, 0, W, H);
 
     if (!volumeProfile || volumeProfile.levels.length === 0) {
-      ctx.fillStyle = "#4a4a66";
+      ctx.fillStyle = textMuted;
       ctx.font = "10px monospace";
       ctx.textAlign = "center";
       ctx.fillText("No data", W / 2, H / 2);
       return;
     }
 
-    const levels = [...volumeProfile.levels].sort((a, b) => b.price - a.price); // desc
+    const levels = [...volumeProfile.levels].sort((a, b) => b.price - a.price);
     const rowH = Math.max(2, Math.floor(H / levels.length));
 
-    // Max volume for scale
     const maxVol = Math.max(
       ...levels.map((l) =>
         tab === "total"
@@ -53,101 +71,82 @@ export default function VolumeProfilePanel() {
       )
     );
 
-    const BAR_MAX_W = W - 50; // leave room for labels
+    const BAR_MAX_W = W - 50;
 
     for (let i = 0; i < levels.length; i++) {
       const level = levels[i];
       const y = i * rowH;
 
-      // Highlight crosshair price
       if (crosshairPrice !== null && Math.abs(level.price - crosshairPrice) < 5) {
-        ctx.fillStyle = "rgba(124,106,245,0.1)";
+        ctx.fillStyle = hex2rgba(highlight, 0.1);
         ctx.fillRect(0, y, W, rowH);
       }
 
-      // POC highlight
       if (level.isPOC) {
-        ctx.fillStyle = "rgba(245,200,66,0.12)";
+        ctx.fillStyle = hex2rgba(poc, 0.12);
         ctx.fillRect(0, y, W, rowH);
-      }
-      // VAH/VAL
-      else if (level.isVAH || level.isVAL) {
-        ctx.fillStyle = "rgba(245,200,66,0.05)";
+      } else if (level.isVAH || level.isVAL) {
+        ctx.fillStyle = hex2rgba(poc, 0.05);
         ctx.fillRect(0, y, W, rowH);
       }
 
-      // Volume bar
       let vol = 0;
-      let color = "#5c5c80";
+      let color = textMuted;
 
       if (tab === "total") {
         const buyW = (level.askVolume / maxVol) * BAR_MAX_W;
         const sellW = (level.bidVolume / maxVol) * BAR_MAX_W;
-        // Stacked buy/sell
-        ctx.fillStyle = "#26a69a";
+        ctx.fillStyle = buy;
         ctx.fillRect(0, y + 1, buyW, rowH - 2);
-        ctx.fillStyle = "#ef5350";
+        ctx.fillStyle = sell;
         ctx.fillRect(buyW, y + 1, sellW, rowH - 2);
         vol = level.totalVolume;
-        color = "#7a7a99";
+        color = textSec;
       } else if (tab === "buy") {
         vol = level.askVolume;
-        color = "#26a69a";
-        const bw = (vol / maxVol) * BAR_MAX_W;
+        color = buy;
         ctx.fillStyle = color;
-        ctx.fillRect(0, y + 1, bw, rowH - 2);
+        ctx.fillRect(0, y + 1, (vol / maxVol) * BAR_MAX_W, rowH - 2);
       } else if (tab === "sell") {
         vol = level.bidVolume;
-        color = "#ef5350";
-        const bw = (vol / maxVol) * BAR_MAX_W;
+        color = sell;
         ctx.fillStyle = color;
-        ctx.fillRect(0, y + 1, bw, rowH - 2);
+        ctx.fillRect(0, y + 1, (vol / maxVol) * BAR_MAX_W, rowH - 2);
       } else {
         vol = level.delta;
-        color = vol >= 0 ? "#26a69a" : "#ef5350";
-        const bw = (Math.abs(vol) / maxVol) * BAR_MAX_W;
+        color = vol >= 0 ? buy : sell;
         ctx.fillStyle = color;
-        ctx.fillRect(
-          vol >= 0 ? 0 : 0,
-          y + 1,
-          bw,
-          rowH - 2
-        );
+        ctx.fillRect(0, y + 1, (Math.abs(vol) / maxVol) * BAR_MAX_W, rowH - 2);
       }
 
-      // POC line
       if (level.isPOC) {
-        ctx.strokeStyle = "#f5c842";
+        ctx.strokeStyle = poc;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(0, y + rowH);
         ctx.lineTo(BAR_MAX_W, y + rowH);
         ctx.stroke();
-
-        // POC label
-        ctx.fillStyle = "#f5c842";
+        ctx.fillStyle = poc;
         ctx.font = "7px monospace";
         ctx.textAlign = "left";
         ctx.fillText("POC", BAR_MAX_W + 2, y + rowH - 1);
       }
 
-      // VAH/VAL labels
       if (level.isVAH) {
-        ctx.fillStyle = "rgba(245,200,66,0.7)";
+        ctx.fillStyle = hex2rgba(poc, 0.7);
         ctx.font = "7px monospace";
         ctx.textAlign = "left";
         ctx.fillText("VAH", BAR_MAX_W + 2, y + rowH - 1);
       }
       if (level.isVAL) {
-        ctx.fillStyle = "rgba(245,200,66,0.7)";
+        ctx.fillStyle = hex2rgba(poc, 0.7);
         ctx.font = "7px monospace";
         ctx.textAlign = "left";
         ctx.fillText("VAL", BAR_MAX_W + 2, y + rowH - 1);
       }
     }
 
-    // Grid lines
-    ctx.strokeStyle = "#13131a";
+    ctx.strokeStyle = borderMuted;
     ctx.lineWidth = 0.5;
     for (let i = 0; i <= levels.length; i++) {
       const y = i * rowH;
@@ -156,7 +155,7 @@ export default function VolumeProfilePanel() {
       ctx.lineTo(W, y);
       ctx.stroke();
     }
-  }, [volumeProfile, crosshairPrice, tab]);
+  }, [volumeProfile, crosshairPrice, tab, theme]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
