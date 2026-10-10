@@ -12,6 +12,7 @@ export default function OBIPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
   const obiHistory = useTerminalStore((s) => s.obiHistory);
   const currentOBI = useTerminalStore((s) => s.currentOBI);
+  const theme = useTerminalStore((s) => s.theme);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -23,7 +24,22 @@ export default function OBIPanel() {
     const W = canvas.width;
     const H = canvas.height;
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#0f0f12";
+
+    const cs = getComputedStyle(document.documentElement);
+    const bgPanel   = cs.getPropertyValue("--bg-surface").trim()  || "#0f0f12";
+    const border    = cs.getPropertyValue("--border").trim()       || "#2a2a3a";
+    const borderMuted = cs.getPropertyValue("--border-muted").trim() || "#1e1e2a";
+    const textMuted  = cs.getPropertyValue("--text-muted").trim()  || "#4a4a66";
+    const buy        = cs.getPropertyValue("--buy").trim()          || "#26a69a";
+    const sell       = cs.getPropertyValue("--sell").trim()         || "#ef5350";
+
+    const hex2rgba = (hex: string, a: number) => {
+      if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
+      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+      return `rgba(${r},${g},${b},${a})`;
+    };
+
+    ctx.fillStyle = bgPanel;
     ctx.fillRect(0, 0, W, H);
 
     if (obiHistory.length < 2) return;
@@ -31,9 +47,8 @@ export default function OBIPanel() {
     const data = obiHistory.slice(-Math.floor(W / 2));
     const step = W / data.length;
 
-    // Zero line
     const zeroY = H / 2;
-    ctx.strokeStyle = "#2a2a3a";
+    ctx.strokeStyle = border;
     ctx.lineWidth = 0.5;
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
@@ -42,10 +57,9 @@ export default function OBIPanel() {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Band lines ±0.5
     for (const band of [-0.5, 0.5]) {
       const y = zeroY - band * (H / 2 - 4);
-      ctx.strokeStyle = "#1e1e2a";
+      ctx.strokeStyle = borderMuted;
       ctx.lineWidth = 0.5;
       ctx.beginPath();
       ctx.moveTo(0, y);
@@ -53,7 +67,6 @@ export default function OBIPanel() {
       ctx.stroke();
     }
 
-    // Fill area
     ctx.beginPath();
     ctx.moveTo(0, zeroY);
     for (let i = 0; i < data.length; i++) {
@@ -67,18 +80,17 @@ export default function OBIPanel() {
     const lastValue = data[data.length - 1]?.value ?? 0;
     const grad = ctx.createLinearGradient(0, 0, 0, H);
     if (lastValue >= 0) {
-      grad.addColorStop(0, "rgba(38,166,154,0.3)");
-      grad.addColorStop(0.5, "rgba(38,166,154,0.05)");
-      grad.addColorStop(1, "rgba(38,166,154,0)");
+      grad.addColorStop(0, hex2rgba(buy, 0.3));
+      grad.addColorStop(0.5, hex2rgba(buy, 0.05));
+      grad.addColorStop(1, hex2rgba(buy, 0));
     } else {
-      grad.addColorStop(0, "rgba(239,83,80,0)");
-      grad.addColorStop(0.5, "rgba(239,83,80,0.05)");
-      grad.addColorStop(1, "rgba(239,83,80,0.3)");
+      grad.addColorStop(0, hex2rgba(sell, 0));
+      grad.addColorStop(0.5, hex2rgba(sell, 0.05));
+      grad.addColorStop(1, hex2rgba(sell, 0.3));
     }
     ctx.fillStyle = grad;
     ctx.fill();
 
-    // OBI line
     ctx.beginPath();
     for (let i = 0; i < data.length; i++) {
       const x = i * step;
@@ -86,18 +98,17 @@ export default function OBIPanel() {
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
-    ctx.strokeStyle = lastValue >= 0 ? "#26a69a" : "#ef5350";
+    ctx.strokeStyle = lastValue >= 0 ? buy : sell;
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // Y-axis labels
-    ctx.fillStyle = "#4a4a66";
+    ctx.fillStyle = textMuted;
     ctx.font = "8px monospace";
     ctx.textAlign = "right";
     ctx.fillText("1.0", W - 2, 10);
     ctx.fillText("0.0", W - 2, zeroY + 4);
     ctx.fillText("-1.0", W - 2, H - 2);
-  }, [obiHistory]);
+  }, [obiHistory, theme]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
