@@ -13,6 +13,7 @@ export default function DepthOfMarket() {
   const orderBook = useTerminalStore((s) => s.orderBook);
   const crosshairPrice = useTerminalStore((s) => s.crosshairPrice);
   const ticker = useTerminalStore((s) => s.ticker);
+  const theme = useTerminalStore((s) => s.theme);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -24,11 +25,25 @@ export default function DepthOfMarket() {
     const W = canvas.width;
     const H = canvas.height;
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#0a0a0c";
+
+    const cs = getComputedStyle(document.documentElement);
+    const bgBase    = cs.getPropertyValue("--bg-base").trim()     || "#0a0a0c";
+    const textMuted  = cs.getPropertyValue("--text-muted").trim() || "#4a4a66";
+    const buy        = cs.getPropertyValue("--buy").trim()         || "#26a69a";
+    const sell       = cs.getPropertyValue("--sell").trim()        || "#ef5350";
+    const highlight  = cs.getPropertyValue("--highlight").trim()   || "#7c6af5";
+
+    const hex2rgba = (hex: string, a: number) => {
+      if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
+      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+      return `rgba(${r},${g},${b},${a})`;
+    };
+
+    ctx.fillStyle = bgBase;
     ctx.fillRect(0, 0, W, H);
 
     if (!orderBook || !ticker) {
-      ctx.fillStyle = "#4a4a66";
+      ctx.fillStyle = textMuted;
       ctx.font = "10px monospace";
       ctx.textAlign = "center";
       ctx.fillText("Waiting for order book…", W / 2, H / 2);
@@ -37,7 +52,6 @@ export default function DepthOfMarket() {
 
     const midPrice = ticker.price;
 
-    // Build cumulative bid/ask arrays
     const bids = orderBook.bids.slice(0, 50);
     const asks = orderBook.asks.slice(0, 50);
 
@@ -51,7 +65,6 @@ export default function DepthOfMarket() {
 
     const priceToX = (p: number) => ((p - minPrice) / priceRange) * W;
 
-    // Cumulative bids (from mid price going left)
     let cumBid = 0;
     const bidPoints: { x: number; y: number }[] = [];
     for (let i = 0; i < bids.length; i++) {
@@ -59,7 +72,6 @@ export default function DepthOfMarket() {
       bidPoints.push({ x: priceToX(bids[i].price), y: cumBid });
     }
 
-    // Cumulative asks (from mid price going right)
     let cumAsk = 0;
     const askPoints: { x: number; y: number }[] = [];
     for (let i = 0; i < asks.length; i++) {
@@ -70,52 +82,41 @@ export default function DepthOfMarket() {
     const maxCum = Math.max(cumBid, cumAsk);
     const volToY = (v: number) => H - (v / maxCum) * (H - 20) - 4;
 
-    // Draw bid area
+    // Bid area
     ctx.beginPath();
     ctx.moveTo(priceToX(midPrice), H);
-    for (let i = 0; i < bidPoints.length; i++) {
-      const { x, y } = bidPoints[i];
-      ctx.lineTo(x, volToY(y));
-    }
+    for (const { x, y } of bidPoints) ctx.lineTo(x, volToY(y));
     ctx.lineTo(bidPoints[bidPoints.length - 1]?.x ?? 0, H);
     ctx.closePath();
-    ctx.fillStyle = "rgba(38,166,154,0.15)";
+    ctx.fillStyle = hex2rgba(buy, 0.15);
     ctx.fill();
 
-    // Bid outline
     ctx.beginPath();
     ctx.moveTo(priceToX(midPrice), volToY(0));
-    for (const { x, y } of bidPoints) {
-      ctx.lineTo(x, volToY(y));
-    }
-    ctx.strokeStyle = "#26a69a";
+    for (const { x, y } of bidPoints) ctx.lineTo(x, volToY(y));
+    ctx.strokeStyle = buy;
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // Draw ask area
+    // Ask area
     ctx.beginPath();
     ctx.moveTo(priceToX(midPrice), H);
-    for (const { x, y } of askPoints) {
-      ctx.lineTo(x, volToY(y));
-    }
+    for (const { x, y } of askPoints) ctx.lineTo(x, volToY(y));
     ctx.lineTo(askPoints[askPoints.length - 1]?.x ?? W, H);
     ctx.closePath();
-    ctx.fillStyle = "rgba(239,83,80,0.15)";
+    ctx.fillStyle = hex2rgba(sell, 0.15);
     ctx.fill();
 
-    // Ask outline
     ctx.beginPath();
     ctx.moveTo(priceToX(midPrice), volToY(0));
-    for (const { x, y } of askPoints) {
-      ctx.lineTo(x, volToY(y));
-    }
-    ctx.strokeStyle = "#ef5350";
+    for (const { x, y } of askPoints) ctx.lineTo(x, volToY(y));
+    ctx.strokeStyle = sell;
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
     // Mid price line
     const midX = priceToX(midPrice);
-    ctx.strokeStyle = "rgba(124,106,245,0.6)";
+    ctx.strokeStyle = hex2rgba(highlight, 0.6);
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 2]);
     ctx.beginPath();
@@ -124,11 +125,10 @@ export default function DepthOfMarket() {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Crosshair price line
     if (crosshairPrice !== null) {
       const cx = priceToX(crosshairPrice);
       if (cx >= 0 && cx <= W) {
-        ctx.strokeStyle = "rgba(255,255,255,0.15)";
+        ctx.strokeStyle = hex2rgba(textMuted, 0.4);
         ctx.lineWidth = 0.5;
         ctx.beginPath();
         ctx.moveTo(cx, 0);
@@ -137,52 +137,36 @@ export default function DepthOfMarket() {
       }
     }
 
-    // Price labels on X axis
-    ctx.fillStyle = "#4a4a66";
+    ctx.fillStyle = textMuted;
     ctx.font = "8px monospace";
     ctx.textAlign = "center";
     const labelStep = Math.ceil(priceRange / 8 / 10) * 10;
-    for (
-      let p = Math.ceil(minPrice / labelStep) * labelStep;
-      p <= maxPrice;
-      p += labelStep
-    ) {
-      const x = priceToX(p);
-      ctx.fillText(p.toLocaleString("en-US"), x, H - 2);
+    for (let p = Math.ceil(minPrice / labelStep) * labelStep; p <= maxPrice; p += labelStep) {
+      ctx.fillText(p.toLocaleString("en-US"), priceToX(p), H - 2);
     }
 
-    // Volume labels
     ctx.textAlign = "right";
-    ctx.fillStyle = "#4a4a66";
-    const maxCumM = maxCum / 1e6;
+    ctx.fillStyle = textMuted;
     for (let i = 1; i <= 3; i++) {
       const v = (maxCum / 4) * i;
       const y = volToY(v);
       ctx.fillText(
-        v >= 1e6
-          ? `${(v / 1e6).toFixed(0)}M`
-          : v >= 1000
-          ? `${(v / 1000).toFixed(0)}K`
-          : v.toFixed(0),
-        W - 2,
-        y
+        v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v.toFixed(0),
+        W - 2, y
       );
     }
 
-    // Legend
-    const bidTotal = cumBid;
-    const askTotal = cumAsk;
     const fmt = (v: number) =>
       v >= 1_000_000 ? (v / 1_000_000).toFixed(2) + "M"
       : v >= 1_000   ? (v / 1_000).toFixed(2) + "K"
       : v.toFixed(4);
     ctx.font = "9px monospace";
     ctx.textAlign = "left";
-    ctx.fillStyle = "#26a69a";
-    ctx.fillText(`■ Bids ${fmt(bidTotal)}`, 4, 12);
-    ctx.fillStyle = "#ef5350";
-    ctx.fillText(`■ Asks ${fmt(askTotal)}`, 4, 22);
-  }, [orderBook, crosshairPrice, ticker]);
+    ctx.fillStyle = buy;
+    ctx.fillText(`■ Bids ${fmt(cumBid)}`, 4, 12);
+    ctx.fillStyle = sell;
+    ctx.fillText(`■ Asks ${fmt(cumAsk)}`, 4, 22);
+  }, [orderBook, crosshairPrice, ticker, theme]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
