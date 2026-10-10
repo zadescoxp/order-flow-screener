@@ -128,7 +128,7 @@ const PROFILE_PANELS: Record<ToolProfile, PanelVisibility> = {
 
 const INITIAL_SETTINGS: TerminalSettings = {
   symbol: "BTCUSDT",
-  venue: "binance-futures",
+  venue: "bybit-futures",
   marketType: "perpetual",
   timeframe: "5m",
   toolProfile: "order-flow",
@@ -179,7 +179,7 @@ export const useTerminalStore = create<TerminalStore>()(
           : s.venue.includes("spot");
         const newVenue = isValidVenue 
           ? s.venue 
-          : (marketType === "perpetual" ? "binance-futures" : "binance-spot");
+          : (marketType === "perpetual" ? "bybit-futures" : "bybit-spot");
         return { marketType, venue: newVenue as Venue, ...INITIAL_MARKET };
       }),
 
