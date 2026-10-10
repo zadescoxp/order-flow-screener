@@ -71,8 +71,25 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     const H = canvas.height;
     ctx.clearRect(0, 0, W, H);
 
-    ctx.fillStyle = "#ffffff"; // NinjaTrader uses white background usually, or we can stick to dark mode #0a0a0c. User requested trading terminal style, let's keep dark mode but make it bright enough.
-    ctx.fillStyle = "#0a0a0c";
+    const rootStyles = getComputedStyle(document.documentElement);
+    const bgBase = rootStyles.getPropertyValue('--bg-base').trim() || "#0a0a0c";
+    const bgPanel = rootStyles.getPropertyValue('--bg-panel').trim() || "#111116";
+    const border = rootStyles.getPropertyValue('--border').trim() || "#1e1e2a";
+    const textPrimary = rootStyles.getPropertyValue('--text-primary').trim() || "#e8e8f0";
+    const textMuted = rootStyles.getPropertyValue('--text-muted').trim() || "#8a8a99";
+    const textSecondary = rootStyles.getPropertyValue('--text-secondary').trim() || "#caced0";
+    const buyColor = rootStyles.getPropertyValue('--buy').trim() || "#26a69a";
+    const sellColor = rootStyles.getPropertyValue('--sell').trim() || "#ef5350";
+
+    const addAlpha = (hex: string, alpha: number) => {
+      if (!hex.startsWith('#')) return hex;
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r},${g},${b},${alpha})`;
+    };
+
+    ctx.fillStyle = bgBase;
     ctx.fillRect(0, 0, W, H);
 
     if (allCandles.length === 0) return; // handled by HTML overlay
@@ -134,9 +151,9 @@ export default function FootprintChart({ height }: FootprintChartProps) {
       // Candle header (time)
       const date = new Date(candle.openTime);
       const timeStr = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
-      ctx.fillStyle = "#1e1e2a";
+      ctx.fillStyle = border;
       ctx.fillRect(x, 0, CANDLE_WIDTH - 1, 14);
-      ctx.fillStyle = "#8a8a99";
+      ctx.fillStyle = textMuted;
       ctx.textAlign = "center";
       ctx.fillText(timeStr, x + CANDLE_WIDTH / 2, 11);
 
@@ -152,12 +169,8 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         const intensity = candle.maxVolumeAtLevel > 0 ? (level.totalVolume / candle.maxVolumeAtLevel) : 0;
         
         // Colors for cell: green if ask > bid, red if bid > ask
-        const r = isAskDom ? 38 : 239;
-        const g = isAskDom ? 166 : 83;
-        const b = isAskDom ? 154 : 80;
         const alpha = 0.1 + (intensity * 0.5); // min 0.1, max 0.6 opacity
-        
-        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx.fillStyle = addAlpha(isAskDom ? buyColor : sellColor, alpha);
         ctx.fillRect(x + 1, y, CANDLE_WIDTH - 2, LEVEL_HEIGHT - 1);
 
         // Text: bid x ask
@@ -166,13 +179,13 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         const textStr = `${bidStr} x ${askStr}`;
         const textY = y + LEVEL_HEIGHT / 2 + (LEVEL_HEIGHT * 0.15);
 
-        ctx.fillStyle = level.totalVolume === candle.maxVolumeAtLevel ? "#ffffff" : "#caced0";
+        ctx.fillStyle = level.totalVolume === candle.maxVolumeAtLevel ? textPrimary : textSecondary;
         ctx.textAlign = "center";
         ctx.fillText(textStr, x + CANDLE_WIDTH / 2, textY);
 
         // Outline POC (Point of Control)
         if (level.totalVolume === candle.maxVolumeAtLevel && level.totalVolume > 0) {
-          ctx.strokeStyle = "#ffffff";
+          ctx.strokeStyle = textPrimary;
           ctx.lineWidth = 1.5;
           ctx.strokeRect(x + 1, y, CANDLE_WIDTH - 2, LEVEL_HEIGHT - 1);
         }
@@ -190,25 +203,25 @@ export default function FootprintChart({ height }: FootprintChartProps) {
       ctx.textAlign = "right";
       
       // Delta
-      ctx.fillStyle = candle.delta >= 0 ? "rgba(38,166,154,0.15)" : "rgba(239,83,80,0.15)";
+      ctx.fillStyle = candle.delta >= 0 ? addAlpha(buyColor, 0.15) : addAlpha(sellColor, 0.15);
       ctx.fillRect(x, tableY, CANDLE_WIDTH - 1, rowH);
-      ctx.fillStyle = candle.delta >= 0 ? "#26a69a" : "#ef5350";
+      ctx.fillStyle = candle.delta >= 0 ? buyColor : sellColor;
       ctx.fillText(deltaStr, x + CANDLE_WIDTH - 4, tableY + rowH - 4);
 
       // Cum Delta
-      ctx.fillStyle = candle.cumulativeDelta >= 0 ? "rgba(38,166,154,0.15)" : "rgba(239,83,80,0.15)";
+      ctx.fillStyle = candle.cumulativeDelta >= 0 ? addAlpha(buyColor, 0.15) : addAlpha(sellColor, 0.15);
       ctx.fillRect(x, tableY + rowH, CANDLE_WIDTH - 1, rowH);
-      ctx.fillStyle = candle.cumulativeDelta >= 0 ? "#26a69a" : "#ef5350";
+      ctx.fillStyle = candle.cumulativeDelta >= 0 ? buyColor : sellColor;
       ctx.fillText(cumDeltaStr, x + CANDLE_WIDTH - 4, tableY + rowH * 2 - 4);
 
       // Volume
-      ctx.fillStyle = "#1e1e2a";
+      ctx.fillStyle = border;
       ctx.fillRect(x, tableY + rowH * 2, CANDLE_WIDTH - 1, rowH);
-      ctx.fillStyle = "#caced0";
+      ctx.fillStyle = textSecondary;
       ctx.fillText(volStr, x + CANDLE_WIDTH - 4, tableY + rowH * 3 - 4);
 
       // Column separator
-      ctx.strokeStyle = "#1e1e2a";
+      ctx.strokeStyle = border;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x + CANDLE_WIDTH - 1, 0);
@@ -217,16 +230,16 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     }
 
     // Draw Y-Axis (Prices)
-    ctx.fillStyle = "#0a0a0c";
+    ctx.fillStyle = bgBase;
     ctx.fillRect(0, 0, PRICE_COL_WIDTH, H);
-    ctx.strokeStyle = "#1e1e2a";
+    ctx.strokeStyle = border;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(PRICE_COL_WIDTH, 0);
     ctx.lineTo(PRICE_COL_WIDTH, H);
     ctx.stroke();
 
-    ctx.fillStyle = "#8a8a99";
+    ctx.fillStyle = textMuted;
     ctx.textAlign = "right";
     for (let i = 0; i < sortedPrices.length; i++) {
       const y = 14 + topOffset + i * LEVEL_HEIGHT + Math.max(9, LEVEL_HEIGHT * 0.45);
@@ -265,9 +278,9 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         ctx.setLineDash([]);
         
         // Draw price label on Y-axis
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = textPrimary;
         ctx.fillRect(0, currentPriceY - 7, PRICE_COL_WIDTH, 14);
-        ctx.fillStyle = "#000000";
+        ctx.fillStyle = bgBase;
         ctx.font = "bold 9px monospace";
         ctx.fillText(ticker.price.toLocaleString("en-US", { minimumFractionDigits: 1 }), PRICE_COL_WIDTH - 4, currentPriceY + 3);
       }
@@ -276,9 +289,9 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     // Bottom Table Labels on Y-Axis
     const tableY = H - BOTTOM_TABLE_HEIGHT;
     const rowH = BOTTOM_TABLE_HEIGHT / 3;
-    ctx.fillStyle = "#111116";
+    ctx.fillStyle = bgPanel;
     ctx.fillRect(0, tableY, PRICE_COL_WIDTH, BOTTOM_TABLE_HEIGHT);
-    ctx.fillStyle = "#caced0";
+    ctx.fillStyle = textSecondary;
     ctx.textAlign = "left";
     ctx.font = "9px monospace";
     ctx.fillText("Delta", 4, tableY + rowH - 4);
@@ -286,7 +299,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     ctx.fillText("Vol", 4, tableY + rowH * 3 - 4);
 
     // Separator above bottom table
-    ctx.strokeStyle = "#2a2a3a";
+    ctx.strokeStyle = border;
     ctx.beginPath();
     ctx.moveTo(0, tableY);
     ctx.lineTo(W, tableY);
