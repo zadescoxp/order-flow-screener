@@ -19,7 +19,7 @@ import {
   computeOBI,
   computeZScore,
 } from "@/lib/engine/orderFlowEngine";
-import type { TerminalStore } from "@/lib/store/terminalStore";
+import type { MarketDataBatch, TerminalStore } from "@/lib/store/terminalStore";
 import type { StoreApi } from "zustand";
 import type {
   Venue,
@@ -71,6 +71,7 @@ export class MarketDataManager {
   private pendingAggregatedBook: ReturnType<typeof aggregateBooks> = null;
   private pendingConnections = new Map<Venue, Parameters<TerminalStore["updateConnection"]>[0]>();
   private pendingCandle: FootprintCandle | null = null;
+  private pendingVolumeProfile: ReturnType<typeof computeVolumeProfile> | null = null;
   private pendingTicker: Parameters<TerminalStore["updateTicker"]>[0] | null = null;
   private pendingOBI: OBISnapshot | null = null;
   private pendingZScores: ZScorePoint[] = [];
@@ -145,6 +146,7 @@ export class MarketDataManager {
     this.pendingOrderBook = null;
     this.pendingAggregatedBook = null;
     this.pendingCandle = null;
+    this.pendingVolumeProfile = null;
     this.pendingTicker = null;
     this.pendingOBI = null;
     this.pendingZScores = [];
@@ -201,8 +203,7 @@ export class MarketDataManager {
         // Volume profile
         const allCandles = [...store.candles];
         if (allCandles.length > 0) {
-          const vp = computeVolumeProfile(allCandles);
-          store.setVolumeProfile(vp);
+          this.pendingVolumeProfile = computeVolumeProfile(allCandles);
         }
       }
 
@@ -224,6 +225,10 @@ export class MarketDataManager {
 
     // Update store with current candle
     this.pendingCandle = { ...this.currentCandleRef };
+    this.pendingVolumeProfile = computeVolumeProfile([
+      ...store.candles,
+      this.currentCandleRef,
+    ]);
 
     // Update ticker
     this.pendingTicker = {
@@ -269,12 +274,7 @@ export class MarketDataManager {
       askVolume: askVol,
     };
     this.pendingOrderBook = {
-      venue: book.venue,
-      symbol: book.symbol,
-      timestamp: aggregate.timestamp,
-      localTimestamp: Date.now(),
-      bids: aggregate.bids,
-      asks: aggregate.asks,
+      ...book,
     };
     this.pendingAggregatedBook = aggregate;
     this.pendingOBI = snap;
@@ -295,35 +295,26 @@ export class MarketDataManager {
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
       const store = this.store.getState();
-      if (this.pendingTrades.length) {
-        for (const trade of this.pendingTrades) store.pushTrade(trade);
-        this.pendingTrades = [];
-      }
-      if (this.pendingOrderBook) {
-        store.updateOrderBook(this.pendingOrderBook);
-        this.pendingOrderBook = null;
-      }
-      if (this.pendingAggregatedBook) {
-        store.updateAggregatedBook(this.pendingAggregatedBook);
-        this.pendingAggregatedBook = null;
-      }
-      if (this.pendingCandle) {
-        store.updateCurrentCandle(this.pendingCandle);
-        this.pendingCandle = null;
-      }
-      if (this.pendingTicker) {
-        store.updateTicker(this.pendingTicker);
-        this.pendingTicker = null;
-      }
-      if (this.pendingOBI) {
-        store.pushOBI(this.pendingOBI);
-        this.pendingOBI = null;
-      }
-      for (const point of this.pendingZScores) store.pushZScore(point);
+      const batch: MarketDataBatch = {
+        trades: this.pendingTrades,
+        orderBook: this.pendingOrderBook,
+        aggregatedBook: this.pendingAggregatedBook,
+        candle: this.pendingCandle,
+        volumeProfile: this.pendingVolumeProfile,
+        ticker: this.pendingTicker,
+        obi: this.pendingOBI,
+        zScores: this.pendingZScores,
+        connections: [...this.pendingConnections.values()],
+      };
+      store.applyMarketDataBatch(batch);
+      this.pendingTrades = [];
+      this.pendingOrderBook = null;
+      this.pendingAggregatedBook = null;
+      this.pendingCandle = null;
+      this.pendingVolumeProfile = null;
+      this.pendingTicker = null;
+      this.pendingOBI = null;
       this.pendingZScores = [];
-      for (const connection of this.pendingConnections.values()) {
-        store.updateConnection(connection);
-      }
       this.pendingConnections.clear();
     }, 50);
   }

@@ -21,7 +21,6 @@ import type {
   ZScorePoint,
   VenueConnection,
   MarketTicker,
-  OrderBookLevel,
 } from "@/lib/types/market";
 import { RingBuffer } from "@/lib/session/RingBuffer";
 
@@ -92,11 +91,24 @@ export interface TerminalActions {
   pushZScore: (z: ZScorePoint) => void;
   updateConnection: (conn: VenueConnection) => void;
   updateTicker: (t: MarketTicker) => void;
+  applyMarketDataBatch: (batch: MarketDataBatch) => void;
   setCrosshair: (time: number | null, price: number | null) => void;
   resetMarketData: () => void;
 }
 
 export type TerminalStore = TerminalSettings & MarketDataState & TerminalActions;
+
+export interface MarketDataBatch {
+  trades: NormalizedTrade[];
+  orderBook: NormalizedOrderBook | null;
+  aggregatedBook: AggregatedOrderBook | null;
+  candle: FootprintCandle | null;
+  volumeProfile: VolumeProfile | null;
+  ticker: MarketTicker | null;
+  obi: OBISnapshot | null;
+  zScores: ZScorePoint[];
+  connections: VenueConnection[];
+}
 
 // ----------------------------------------------------------
 // Default panel visibility per tool profile
@@ -274,6 +286,34 @@ export const createTerminalStore = () => {
       })),
 
     updateTicker: (ticker) => set({ ticker }),
+
+    applyMarketDataBatch: (batch) =>
+      set((s) => {
+        for (const trade of batch.trades) recentTradeBuffer.push(trade);
+        return {
+          recentTrades: batch.trades.length
+            ? recentTradeBuffer.newestFirst()
+            : s.recentTrades,
+          orderBook: batch.orderBook ?? s.orderBook,
+          aggregatedBook: batch.aggregatedBook ?? s.aggregatedBook,
+          currentCandle: batch.candle ?? s.currentCandle,
+          volumeProfile: batch.volumeProfile ?? s.volumeProfile,
+          ticker: batch.ticker ?? s.ticker,
+          currentOBI: batch.obi?.value ?? s.currentOBI,
+          obiHistory: batch.obi
+            ? [...s.obiHistory, batch.obi].slice(-300)
+            : s.obiHistory,
+          zScoreHistory: batch.zScores.length
+            ? [...s.zScoreHistory, ...batch.zScores].slice(-500)
+            : s.zScoreHistory,
+          connections: batch.connections.length
+            ? {
+                ...s.connections,
+                ...Object.fromEntries(batch.connections.map((connection) => [connection.venue, connection])),
+              }
+            : s.connections,
+        };
+      }),
 
     setCrosshair: (crosshairTime, crosshairPrice) =>
       set({ crosshairTime, crosshairPrice }),

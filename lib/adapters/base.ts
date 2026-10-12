@@ -146,11 +146,32 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
   }
 
   protected emitTrade(trade: NormalizedTrade): void {
+    if (
+      !Number.isFinite(trade.timestamp) ||
+      !Number.isFinite(trade.price) ||
+      trade.price <= 0 ||
+      !Number.isFinite(trade.quantity) ||
+      trade.quantity <= 0
+    ) {
+      this.reportError(`Invalid ${this.venue} trade payload`);
+      return;
+    }
     this.emit("trade", trade);
   }
 
   protected emitOrderBook(book: NormalizedOrderBook): void {
-    this.emit("orderbook", book);
+    const isValidLevel = (level: NormalizedOrderBook["bids"][number]) =>
+      Number.isFinite(level.price) &&
+      level.price > 0 &&
+      Number.isFinite(level.size) &&
+      level.size > 0;
+    const bids = book.bids.filter(isValidLevel);
+    const asks = book.asks.filter(isValidLevel);
+    if (bids.length === 0 || asks.length === 0) {
+      this.reportError(`Invalid ${this.venue} order book payload`);
+      return;
+    }
+    this.emit("orderbook", { ...book, bids, asks });
   }
 
   getStatus(): VenueConnection {
