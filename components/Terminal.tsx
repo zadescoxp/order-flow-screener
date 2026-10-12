@@ -17,7 +17,6 @@ import TradesProfilePanel from "@/components/TradesProfile";
 import GlobalTooltip from "@/components/GlobalTooltip";
 import ConnectionStatusBar from "@/components/ConnectionStatus";
 import type { MarketTicker, PanelVisibility } from "@/lib/types/market";
-import HeatmapPanel from "@/components/HeatmapPanel";
 
 // ─── Main Terminal Layout ────────────────────────────────────────
 // Flex layout for resizable panels
@@ -155,11 +154,6 @@ function CenterColumn({ panels }: { panels: PanelVisibility }) {
           overflow: "hidden",
         }}
       >
-        {panels.heatmap && (
-          <div style={{ height: 240, minHeight: 160, flexShrink: 0, borderBottom: "1px solid var(--border)", overflow: "hidden" }}>
-            <HeatmapPanel />
-          </div>
-        )}
         <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
           <FootprintChartWrapper />
         </div>

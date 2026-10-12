@@ -5,6 +5,7 @@ import { useSessionStore, useSessionStoreApi } from "@/lib/session/SessionContex
 import { scheduleCanvasRedraw } from "@/lib/session/canvasScheduler";
 import type { FootprintCandle, FootprintLevel } from "@/lib/types/market";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
+import { useUIStore } from "@/lib/store/uiStore";
 
 // ─── Footprint Chart — Canvas Renderer ─────────────────────────────
 // This renders the actual price×time×volume footprint chart.
@@ -41,6 +42,25 @@ function formatVol(v: number): string {
   return v.toFixed(v < 1 ? 2 : 0);
 }
 
+function heatmapColor(value: number, max: number): string {
+  const intensity = Math.min(1, max > 0 ? value / max : 0);
+  const stops = [
+    [8, 28, 52],
+    [16, 111, 166],
+    [89, 201, 222],
+    [255, 249, 202],
+    [255, 177, 0],
+    [232, 48, 36],
+  ];
+  const scaled = intensity * (stops.length - 1);
+  const index = Math.min(stops.length - 2, Math.floor(scaled));
+  const fraction = scaled - index;
+  const from = stops[index];
+  const to = stops[index + 1];
+  const rgb = from.map((channel, i) => Math.round(channel + (to[i] - channel) * fraction));
+  return `rgb(${rgb.join(",")})`;
+}
+
 interface FootprintChartProps {
   height: number;
 }
@@ -60,6 +80,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
   const tickSize = useSessionStore((s) => s.tickSize);
   const setCrosshair = useSessionStore((s) => s.setCrosshair);
   const sessionStore = useSessionStoreApi();
+  const tradedVolumeHeatmap = useUIStore((s) => s.heatmap.tradedVolume);
 
   const allCandles = [...candles, ...(currentCandle ? [currentCandle] : [])];
 
@@ -141,6 +162,34 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     const startCandle = Math.floor(scroll / CANDLE_WIDTH);
     const endCandle = Math.min(allCandles.length - 1, startCandle + Math.ceil((W - PRICE_COL_WIDTH) / CANDLE_WIDTH) + 1);
 
+    if (tradedVolumeHeatmap) {
+      const volumeValues = allCandles.flatMap((candle) =>
+        [...candle.levels.values()].map((level) => level.totalVolume)
+      ).filter((volume) => volume > 0).sort((a, b) => a - b);
+      const heatmapMax = volumeValues.length
+        ? volumeValues[Math.min(volumeValues.length - 1, Math.floor(volumeValues.length * 0.95))]
+        : 1;
+
+      ctx.fillStyle = "#081c34";
+      ctx.fillRect(PRICE_COL_WIDTH, 14, W - PRICE_COL_WIDTH, chartH - 14);
+      for (let ci = startCandle; ci <= endCandle; ci++) {
+        const candle = allCandles[ci];
+        if (!candle) continue;
+        const x = PRICE_COL_WIDTH + ci * CANDLE_WIDTH - scroll;
+        if (x + CANDLE_WIDTH < PRICE_COL_WIDTH || x > W) continue;
+        for (let pi = 0; pi < sortedPrices.length; pi++) {
+          const level = candle.levels.get(sortedPrices[pi]);
+          const y = 14 + topOffset + pi * LEVEL_HEIGHT;
+          if (y < 14 || y > chartH) continue;
+          const volume = level?.totalVolume ?? 0;
+          ctx.fillStyle = heatmapColor(volume, heatmapMax);
+          ctx.globalAlpha = volume > 0 ? 0.92 : 0.18;
+          ctx.fillRect(x, y, CANDLE_WIDTH - 1, LEVEL_HEIGHT);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
     ctx.font = `${Math.max(9, LEVEL_HEIGHT * 0.45)}px monospace`;
 
     for (let ci = startCandle; ci <= endCandle; ci++) {
@@ -171,7 +220,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         const intensity = candle.maxVolumeAtLevel > 0 ? (level.totalVolume / candle.maxVolumeAtLevel) : 0;
         
         // Colors for cell: green if ask > bid, red if bid > ask
-        const alpha = 0.1 + (intensity * 0.5); // min 0.1, max 0.6 opacity
+        const alpha = tradedVolumeHeatmap ? 0.08 + (intensity * 0.12) : 0.1 + (intensity * 0.5);
         ctx.fillStyle = addAlpha(isAskDom ? buyColor : sellColor, alpha);
         ctx.fillRect(x + 1, y, CANDLE_WIDTH - 2, LEVEL_HEIGHT - 1);
 
@@ -307,7 +356,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     ctx.lineTo(W, tableY);
     ctx.stroke();
 
-  }, [allCandles, sessionStore, tickSize]);
+  }, [allCandles, sessionStore, tickSize, tradedVolumeHeatmap]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
