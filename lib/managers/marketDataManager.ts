@@ -7,6 +7,7 @@
 "use client";
 
 import { createAdapter } from "@/lib/adapters/exchanges";
+import { venueSupports } from "@/lib/adapters/capabilities";
 import type { BaseExchangeAdapter } from "@/lib/adapters/base";
 import {
   getCandleOpenTime,
@@ -60,6 +61,16 @@ class MarketDataManager {
     tickSize: number,
     imbalanceThreshold: number
   ): void {
+    if (!venueSupports(venue, symbol, marketType)) {
+      useTerminalStore.getState().updateConnection({
+        venue,
+        status: "error",
+        lastHeartbeat: 0,
+        reconnectAttempts: 0,
+        error: `${venue} does not support ${symbol} ${marketType}`,
+      });
+      return;
+    }
     if (
       this.adapter !== null &&
       this.currentVenue === venue &&
