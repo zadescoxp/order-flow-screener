@@ -5,6 +5,7 @@ import { useTerminalStore } from "@/lib/store/terminalStore";
 import type { Venue, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
 import type { Theme } from "@/lib/theme";
 import { formatPrice } from "@/lib/engine/orderFlowEngine";
+import { venueSupports } from "@/lib/adapters/capabilities";
 
 // ─── Theme options ───────────────────────────────────────────
 const THEMES: { value: Theme; label: string }[] = [
@@ -60,7 +61,7 @@ function ConnectionStatus() {
       <div className="flex items-center gap-2">
         <span
           className={`status-dot ${status}`}
-          title={status}
+          title={conn?.error ?? status}
         />
         <span
           style={{
@@ -242,7 +243,11 @@ export default function TopBar() {
           id="venue-selector"
         >
           {venues.map((v) => (
-            <option key={v.value} value={v.value}>
+            <option
+              key={v.value}
+              value={v.value}
+              disabled={!venueSupports(v.value, symbol, marketType)}
+            >
               {v.label}
             </option>
           ))}
@@ -329,7 +334,7 @@ export default function TopBar() {
           𝕏 @zadescoxp
         </a>
         <a
-          href="https://github.com"
+          href="https://github.com/zadescoxp/order-flow-screener"
           target="_blank"
           rel="noopener noreferrer"
           className="btn"

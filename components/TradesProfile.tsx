@@ -16,6 +16,7 @@ export default function TradesProfilePanel() {
   const recentTrades = useTerminalStore((s) => s.recentTrades);
   const crosshairPrice = useTerminalStore((s) => s.crosshairPrice);
   const tickSize = useTerminalStore((s) => s.tickSize);
+  const theme = useTerminalStore((s) => s.theme);
   const [tab, setTab] = useState<TradesTab>("volume");
 
   // Aggregate trades by price level
@@ -55,11 +56,26 @@ export default function TradesProfilePanel() {
     const W = canvas.width;
     const H = canvas.height;
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#0f0f12";
+
+    const cs = getComputedStyle(document.documentElement);
+    const bgPanel   = cs.getPropertyValue("--bg-surface").trim()  || "#0f0f12";
+    const textMuted  = cs.getPropertyValue("--text-muted").trim() || "#4a4a66";
+    const highlight  = cs.getPropertyValue("--highlight").trim()   || "#7c6af5";
+    const buy        = cs.getPropertyValue("--buy").trim()          || "#26a69a";
+    const sell       = cs.getPropertyValue("--sell").trim()         || "#ef5350";
+    const borderMuted = cs.getPropertyValue("--border-muted").trim() || "#13131a";
+
+    const hex2rgba = (hex: string, a: number) => {
+      if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
+      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+      return `rgba(${r},${g},${b},${a})`;
+    };
+
+    ctx.fillStyle = bgPanel;
     ctx.fillRect(0, 0, W, H);
 
     if (profile.length === 0) {
-      ctx.fillStyle = "#4a4a66";
+      ctx.fillStyle = textMuted;
       ctx.font = "10px monospace";
       ctx.textAlign = "center";
       ctx.fillText("No trades yet", W / 2, H / 2);
@@ -68,9 +84,7 @@ export default function TradesProfilePanel() {
 
     const rowH = Math.max(2, Math.floor(H / profile.length));
     const maxVal = Math.max(
-      ...profile.map((l) =>
-        tab === "volume" ? l.totalVol : l.totalTrades
-      )
+      ...profile.map((l) => tab === "volume" ? l.totalVol : l.totalTrades)
     );
     const BAR_W = W - 4;
 
@@ -78,37 +92,35 @@ export default function TradesProfilePanel() {
       const level = profile[i];
       const y = i * rowH;
 
-      // Crosshair highlight
       if (crosshairPrice !== null && Math.abs(level.price - crosshairPrice) < tickSize) {
-        ctx.fillStyle = "rgba(124,106,245,0.1)";
+        ctx.fillStyle = hex2rgba(highlight, 0.1);
         ctx.fillRect(0, y, W, rowH);
       }
 
       if (tab === "volume") {
         const buyW = (level.buyVol / maxVal) * BAR_W;
         const sellW = (level.sellVol / maxVal) * BAR_W;
-        ctx.fillStyle = "#26a69a";
+        ctx.fillStyle = buy;
         ctx.fillRect(0, y + 1, buyW, rowH - 2);
-        ctx.fillStyle = "#ef5350";
+        ctx.fillStyle = sell;
         ctx.fillRect(buyW, y + 1, sellW, rowH - 2);
       } else {
         const buyW = (level.buyTrades / maxVal) * BAR_W;
         const sellW = (level.sellTrades / maxVal) * BAR_W;
-        ctx.fillStyle = "rgba(38,166,154,0.7)";
+        ctx.fillStyle = hex2rgba(buy, 0.7);
         ctx.fillRect(0, y + 1, buyW, rowH - 2);
-        ctx.fillStyle = "rgba(239,83,80,0.7)";
+        ctx.fillStyle = hex2rgba(sell, 0.7);
         ctx.fillRect(buyW, y + 1, sellW, rowH - 2);
       }
 
-      // Row separator
-      ctx.strokeStyle = "#13131a";
+      ctx.strokeStyle = borderMuted;
       ctx.lineWidth = 0.5;
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(W, y);
       ctx.stroke();
     }
-  }, [profile, crosshairPrice, tab, tickSize]);
+  }, [profile, crosshairPrice, tab, tickSize, theme]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

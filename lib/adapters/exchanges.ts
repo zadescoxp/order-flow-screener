@@ -77,10 +77,16 @@ export class BybitFuturesAdapter extends BaseExchangeAdapter {
       }
     } else if (msg.topic.startsWith("orderbook.")) {
       const data = msg.data as BybitDepthData;
-      if (msg.type === "snapshot") { this.bids.clear(); this.asks.clear(); }
+      if (msg.type === "snapshot") { this.bids.clear(); this.asks.clear(); this.lastSeq = 0; }
+      if (msg.type === "delta" && this.lastSeq > 0 && data.u > this.lastSeq + 1) {
+        this.bids.clear();
+        this.asks.clear();
+        this.requestResubscribe();
+        return;
+      }
       for (const [p, q] of data.b) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
       for (const [p, q] of data.a) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
-      this.lastSeq = data.seq;
+      this.lastSeq = data.u;
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
     }
   }
@@ -102,6 +108,7 @@ export class BybitSpotAdapter extends BaseExchangeAdapter {
   private readonly BASE_WS = "wss://stream.bybit.com/v5/public/spot";
   private bids = new Map<number, number>();
   private asks = new Map<number, number>();
+  private lastSeq = 0;
 
   constructor(symbol: string) { super(symbol.toUpperCase()); }
   protected buildWsUrl(): string { return this.BASE_WS; }
@@ -135,9 +142,16 @@ export class BybitSpotAdapter extends BaseExchangeAdapter {
       }
     } else if (msg.topic.startsWith("orderbook.")) {
       const data = msg.data as BybitDepthData;
-      if (msg.type === "snapshot") { this.bids.clear(); this.asks.clear(); }
+      if (msg.type === "snapshot") { this.bids.clear(); this.asks.clear(); this.lastSeq = 0; }
+      if (msg.type === "delta" && this.lastSeq > 0 && data.u > this.lastSeq + 1) {
+        this.bids.clear();
+        this.asks.clear();
+        this.requestResubscribe();
+        return;
+      }
       for (const [p, q] of data.b) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
       for (const [p, q] of data.a) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
+      this.lastSeq = data.u;
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
     }
   }
@@ -159,6 +173,7 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
   private readonly BASE_WS = "wss://ws.okx.com:8443/ws/v5/public";
   private bids = new Map<number, number>();
   private asks = new Map<number, number>();
+  private contractValue = 1;
 
   constructor(symbol: string) {
     // Accept BTCUSDT or BTC-USDT-SWAP — normalize to BTC-USDT-SWAP
@@ -175,10 +190,11 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
   connect(): void {
     this.setStatus("connecting");
     this.ws = new WebSocket(this.buildWsUrl()) as unknown as WebSocket;
-    this.ws.onopen = () => {
+    this.ws.onopen = async () => {
       this.reconnectAttempts = 0;
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
+      await this.loadContractValue();
       this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId: this.symbol }, { channel: "books5", instId: this.symbol }] }));
       this.startPing(25_000);
     };
@@ -201,20 +217,37 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
     const msg = raw as { arg: { channel: string }; action?: string; data: unknown[] };
     if (msg.arg.channel === "trades") {
       for (const t of msg.data as Array<{ tradeId: string; instId: string; px: string; sz: string; side: "buy" | "sell"; ts: string }>) {
-        const price = parseFloat(t.px), qty = parseFloat(t.sz);
+        const price = parseFloat(t.px), qty = parseFloat(t.sz) * this.contractValue;
         this.emitTrade({ id: `okx-${t.tradeId}`, venue: this.venue, symbol: t.instId, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side, marketType: "perpetual" });
       }
     } else if (msg.arg.channel === "books5") {
       for (const d of msg.data as Array<{ bids: [string, string, string, string][]; asks: [string, string, string, string][]; ts: string }>) {
         this.bids.clear(); this.asks.clear();
-        for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
-        for (const [p, q] of d.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(price, qty); }
+        for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q) * this.contractValue; if (qty > 0) this.bids.set(price, qty); }
+        for (const [p, q] of d.asks) { const price = parseFloat(p), qty = parseFloat(q) * this.contractValue; if (qty > 0) this.asks.set(price, qty); }
         emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
       }
     }
   }
 
   protected sendPing(): void { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send("ping"); }
+  private async loadContractValue(): Promise<void> {
+    try {
+      const response = await fetch(
+        `https://www.okx.com/api/v5/public/instruments?instType=SWAP&instId=${encodeURIComponent(this.symbol)}`
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body = await response.json() as { data?: Array<{ ctVal?: string }> };
+      const value = Number(body.data?.[0]?.ctVal);
+      if (Number.isFinite(value) && value > 0) this.contractValue = value;
+    } catch (error) {
+      this.reportError(
+        `Unable to load OKX contract value: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
   private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }
@@ -654,17 +687,20 @@ export class DeribitAdapter extends BaseExchangeAdapter {
 
     if (channel.startsWith("trades.")) {
       for (const t of data as Array<{ trade_id: string; instrument_name: string; price: number; amount: number; direction: "buy" | "sell"; timestamp: number }>) {
-        this.emitTrade({ id: `db-${t.trade_id}`, venue: this.venue, symbol: t.instrument_name, timestamp: t.timestamp, localTimestamp: Date.now(), price: t.price, quantity: t.amount, quoteVolume: t.price * t.amount, side: t.direction, marketType: "perpetual" });
+        const quantity = t.amount / t.price;
+        this.emitTrade({ id: `db-${t.trade_id}`, venue: this.venue, symbol: t.instrument_name, timestamp: t.timestamp, localTimestamp: Date.now(), price: t.price, quantity, quoteVolume: t.price * quantity, side: t.direction, marketType: "perpetual" });
       }
     } else if (channel.startsWith("book.")) {
       const d = data as { type: "snapshot" | "change"; bids: [string, number, number][]; asks: [string, number, number][] };
       if (d.type === "snapshot") { this.bids.clear(); this.asks.clear(); }
       // Deribit book format: ["new"|"change"|"delete", price, amount]
       for (const [action, price, amount] of d.bids) {
-        if (action === "delete" || amount === 0) this.bids.delete(price); else this.bids.set(price, amount);
+        const quantity = amount / price;
+        if (action === "delete" || amount === 0) this.bids.delete(price); else this.bids.set(price, quantity);
       }
       for (const [action, price, amount] of d.asks) {
-        if (action === "delete" || amount === 0) this.asks.delete(price); else this.asks.set(price, amount);
+        const quantity = amount / price;
+        if (action === "delete" || amount === 0) this.asks.delete(price); else this.asks.set(price, quantity);
       }
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
     }

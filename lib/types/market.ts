@@ -181,6 +181,7 @@ export interface VenueConnection {
   lastHeartbeat: number;
   latencyMs?: number;
   reconnectAttempts: number;
+  error?: string;
 }
 
 // ----------------------------------------------------------

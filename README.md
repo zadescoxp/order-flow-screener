@@ -142,4 +142,4 @@ Exchange WebSockets → Exchange Adapters → Order Flow Engine → Zustand Stor
 
 ## License
 
-MIT
+Apache 2.0
