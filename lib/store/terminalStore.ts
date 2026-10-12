@@ -3,8 +3,9 @@
 // ============================================================
 
 import { create } from "zustand";
-import { subscribeWithSelector } from "zustand/middleware";
+import { persist, subscribeWithSelector } from "zustand/middleware";
 import { type Theme, applyTheme } from "@/lib/theme";
+import { getAutoTickSize } from "@/lib/engine/orderFlowEngine";
 import type {
   Venue,
   MarketType,
@@ -33,6 +34,8 @@ export interface TerminalSettings {
   timeframe: Timeframe;
   toolProfile: ToolProfile;
   tickSize: number;
+  tickBaseSize: number;
+  tickMultiplier: 1 | 2 | 5 | 10;
   imbalanceThreshold: number;
   stackedImbalanceLevels: number;
   zScoreWindow: number;
@@ -72,8 +75,11 @@ export interface TerminalActions {
   setTimeframe: (t: Timeframe) => void;
   setToolProfile: (tp: ToolProfile) => void;
   setTickSize: (ts: number) => void;
+  setTickMultiplier: (multiplier: 1 | 2 | 5 | 10) => void;
+  setAutoTickPrice: (price: number) => void;
   setImbalanceThreshold: (t: number) => void;
   setOrderBookMode: (m: "single" | "aggregated" | "compact") => void;
+  setZScoreWindow: (window: number) => void;
   setPanelVisible: (panel: keyof PanelVisibility, visible: boolean) => void;
   setTheme: (theme: Theme) => void;
 
@@ -136,6 +142,8 @@ const INITIAL_SETTINGS: TerminalSettings = {
   timeframe: "5m",
   toolProfile: "order-flow",
   tickSize: 10,
+  tickBaseSize: 10,
+  tickMultiplier: 1,
   imbalanceThreshold: 3,
   stackedImbalanceLevels: 3,
   zScoreWindow: 20,
@@ -165,7 +173,8 @@ const INITIAL_MARKET: MarketDataState = {
 // Create the store
 // ----------------------------------------------------------
 export const useTerminalStore = create<TerminalStore>()(
-  subscribeWithSelector((set) => ({
+  persist(
+    subscribeWithSelector((set) => ({
     ...INITIAL_SETTINGS,
     ...INITIAL_MARKET,
 
@@ -193,12 +202,24 @@ export const useTerminalStore = create<TerminalStore>()(
     setToolProfile: (toolProfile) =>
       set({ toolProfile, panels: PROFILE_PANELS[toolProfile] }),
 
-    setTickSize: (tickSize) => set({ tickSize }),
+    setTickSize: (tickSize) => set({ tickSize, tickBaseSize: tickSize, tickMultiplier: 1, ...INITIAL_MARKET }),
+
+    setTickMultiplier: (tickMultiplier) =>
+      set((s) => ({ tickMultiplier, tickSize: s.tickBaseSize * tickMultiplier, ...INITIAL_MARKET })),
+
+    setAutoTickPrice: (price) =>
+      set((s) => {
+        const base = Math.max(0.00000001, getAutoTickSize(price));
+        if (Math.abs(base - s.tickBaseSize) < Number.EPSILON) return {};
+        return { tickBaseSize: base, tickSize: base * s.tickMultiplier, ...INITIAL_MARKET };
+      }),
 
     setImbalanceThreshold: (imbalanceThreshold) =>
       set({ imbalanceThreshold }),
 
     setOrderBookMode: (orderBookMode) => set({ orderBookMode }),
+
+    setZScoreWindow: (zScoreWindow) => set({ zScoreWindow, ...INITIAL_MARKET }),
 
     setPanelVisible: (panel, visible) =>
       set((s) => ({
@@ -252,5 +273,37 @@ export const useTerminalStore = create<TerminalStore>()(
       set({ crosshairTime, crosshairPrice }),
 
     resetMarketData: () => set(INITIAL_MARKET),
-  }))
+    })),
+    {
+      name: "order-flow-terminal-settings",
+      partialize: (state) => ({
+        symbol: state.symbol,
+        venue: state.venue,
+        marketType: state.marketType,
+        timeframe: state.timeframe,
+        toolProfile: state.toolProfile,
+        tickSize: state.tickSize,
+        tickBaseSize: state.tickBaseSize,
+        tickMultiplier: state.tickMultiplier,
+        imbalanceThreshold: state.imbalanceThreshold,
+        stackedImbalanceLevels: state.stackedImbalanceLevels,
+        zScoreWindow: state.zScoreWindow,
+        orderBookMode: state.orderBookMode,
+        panels: state.panels,
+        theme: state.theme,
+      }),
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<TerminalSettings>;
+        return {
+          ...current,
+          ...saved,
+          tickBaseSize: saved.tickBaseSize ?? saved.tickSize ?? current.tickBaseSize,
+          tickMultiplier: saved.tickMultiplier ?? 1,
+        };
+      },
+      onRehydrateStorage: () => (state) => {
+        if (state && typeof document !== "undefined") applyTheme(state.theme);
+      },
+    }
+  )
 );

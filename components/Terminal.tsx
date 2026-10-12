@@ -13,6 +13,7 @@ import DepthOfMarket from "@/components/DepthOfMarket";
 import VolatilityPanel from "@/components/VolatilityPanel";
 import TradesProfilePanel from "@/components/TradesProfile";
 import GlobalTooltip from "@/components/GlobalTooltip";
+import { formatPrice } from "@/lib/engine/orderFlowEngine";
 
 // ─── Main Terminal Layout ────────────────────────────────────────
 // Flex layout for resizable panels
@@ -113,6 +114,7 @@ function CenterColumn({ panels }: { panels: ReturnType<typeof useTerminalStore.g
   const venue = useTerminalStore((s) => s.venue);
   const timeframe = useTerminalStore((s) => s.timeframe);
   const marketType = useTerminalStore((s) => s.marketType);
+  const tickSize = useTerminalStore((s) => s.tickSize);
 
   return (
     <div
@@ -132,6 +134,7 @@ function CenterColumn({ panels }: { panels: ReturnType<typeof useTerminalStore.g
         timeframe={timeframe}
         marketType={marketType}
         ticker={ticker}
+        tickSize={tickSize}
       />
 
       <div
@@ -186,12 +189,14 @@ function ChartHeader({
   timeframe,
   marketType,
   ticker,
+  tickSize,
 }: {
   symbol: string;
   venue: string;
   timeframe: string;
   marketType: string;
   ticker: ReturnType<typeof useTerminalStore.getState>["ticker"];
+  tickSize: number;
 }) {
   const formattedVenue = venue
     .split("-")
@@ -226,25 +231,25 @@ function ChartHeader({
           <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>
             O{" "}
             <span style={{ color: "var(--text-secondary)" }}>
-              {ticker.open.toFixed(1)}
+              {formatPrice(ticker.open, tickSize)}
             </span>
           </span>
           <span style={{ color: "var(--text-muted)" }}>
             H{" "}
             <span style={{ color: "var(--buy)" }}>
-              {ticker.high.toFixed(1)}
+              {formatPrice(ticker.high, tickSize)}
             </span>
           </span>
           <span style={{ color: "var(--text-muted)" }}>
             L{" "}
             <span style={{ color: "var(--sell)" }}>
-              {ticker.low.toFixed(1)}
+              {formatPrice(ticker.low, tickSize)}
             </span>
           </span>
           <span style={{ color: "var(--text-muted)" }}>
             C{" "}
             <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-              {ticker.price.toFixed(1)}
+              {formatPrice(ticker.price, tickSize)}
             </span>
           </span>
         </>
