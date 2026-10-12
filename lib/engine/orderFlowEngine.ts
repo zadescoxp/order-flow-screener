@@ -44,7 +44,33 @@ export function getCandleOpenTime(timestamp: number, timeframe: Timeframe): numb
 }
 
 export function roundToTick(price: number, tickSize: number): number {
-  return Math.round(price / tickSize) * tickSize;
+  if (!Number.isFinite(price) || tickSize <= 0) return price;
+  const index = Math.round(price / tickSize);
+  const decimals = getTickDecimals(tickSize);
+  return Number((index * tickSize).toFixed(decimals + 2));
+}
+
+/** Returns a human-friendly 1/2/5 × 10ⁿ tick for the instrument price. */
+export function getAutoTickSize(price: number): number {
+  if (!Number.isFinite(price) || price <= 0) return 1;
+  const raw = price / 1000;
+  const exponent = Math.floor(Math.log10(raw));
+  const magnitude = 10 ** exponent;
+  const normalized = raw / magnitude;
+  const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return nice * magnitude;
+}
+
+export function getTickDecimals(tickSize: number): number {
+  if (!Number.isFinite(tickSize) || tickSize <= 0) return 0;
+  return Math.max(0, Math.ceil(-Math.log10(tickSize) - 1e-10));
+}
+
+export function formatPrice(price: number, tickSize: number): string {
+  return price.toLocaleString("en-US", {
+    minimumFractionDigits: getTickDecimals(tickSize),
+    maximumFractionDigits: getTickDecimals(tickSize),
+  });
 }
 
 // ----------------------------------------------------------

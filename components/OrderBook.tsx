@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useCallback } from "react";
 import { useSessionStore, useSessionStoreApi } from "@/lib/session/SessionContext";
 import type { NormalizedOrderBook } from "@/lib/types/market";
+import { formatPrice as formatTickPrice } from "@/lib/engine/orderFlowEngine";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Order Book Panel ────────────────────────────────────────────
@@ -13,13 +14,6 @@ function formatSize(v: number): string {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
   if (v >= 1000) return `${(v / 1000).toFixed(2)}K`;
   return v.toFixed(4);
-}
-
-function formatPrice(v: number): string {
-  return v.toLocaleString("en-US", {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  });
 }
 
 const MAX_LEVELS = 20;
@@ -134,7 +128,7 @@ export default function OrderBookPanel() {
               style={{ position: "relative", cursor: "crosshair" }}
               onMouseMove={(e) => {
                 showTooltip(
-                  `Ask Level: ${formatPrice(ask.price)}`,
+                  `Ask Level: ${formatTickPrice(ask.price, tickSize)}`,
                   `Size at Price: ${formatSize(ask.size)}\nCumulative Size: ${formatSize(ask.cum)}\n\nWhat this means: There are pending limit sell orders resting at this price. The cumulative size tells you the total amount of sellers blocking the price from moving up to this level.`,
                   e
                 );
@@ -147,7 +141,7 @@ export default function OrderBookPanel() {
                 style={{ width: `${(ask.cum / maxCumAsk) * 100}%`, opacity: 0.12 }}
               />
               <span style={{ color: "var(--sell)", fontWeight: 500 }}>
-                {formatPrice(ask.price)}
+                {formatTickPrice(ask.price, tickSize)}
               </span>
               <span style={{ textAlign: "right", color: "var(--text-secondary)" }}>
                 {formatSize(ask.size)}
@@ -173,7 +167,7 @@ export default function OrderBookPanel() {
           }}
         >
           <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
-            {midPrice.toLocaleString("en-US", { minimumFractionDigits: 1 })}
+            {formatTickPrice(midPrice, tickSize)}
           </span>
           <span style={{ fontSize: 9.5, color: "var(--text-muted)" }}>
             Spread {spread.toFixed(1)} ({spreadPct.toFixed(3)}%)
@@ -189,7 +183,7 @@ export default function OrderBookPanel() {
               style={{ position: "relative", cursor: "crosshair" }}
               onMouseMove={(e) => {
                 showTooltip(
-                  `Bid Level: ${formatPrice(bid.price)}`,
+                  `Bid Level: ${formatTickPrice(bid.price, tickSize)}`,
                   `Size at Price: ${formatSize(bid.size)}\nCumulative Size: ${formatSize(bid.cum)}\n\nWhat this means: There are pending limit buy orders resting at this price. The cumulative size tells you the total amount of buyers supporting the price from dropping down to this level.`,
                   e
                 );
@@ -202,7 +196,7 @@ export default function OrderBookPanel() {
                 style={{ width: `${(bid.cum / maxCumBid) * 100}%`, opacity: 0.12 }}
               />
               <span style={{ color: "var(--buy)", fontWeight: 500 }}>
-                {formatPrice(bid.price)}
+                {formatTickPrice(bid.price, tickSize)}
               </span>
               <span style={{ textAlign: "right", color: "var(--text-secondary)" }}>
                 {formatSize(bid.size)}
