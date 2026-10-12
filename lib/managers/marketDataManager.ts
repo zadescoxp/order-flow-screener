@@ -131,6 +131,15 @@ export class MarketDataManager {
   }
 
   disconnect(): void {
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    this.pendingTrades = [];
+    this.pendingOrderBook = null;
+    this.pendingCandle = null;
+    this.pendingTicker = null;
+    this.pendingOBI = null;
+    this.pendingZScores = [];
+    this.pendingConnection = null;
     if (this.adapter) {
       if (this.tradeListener) this.adapter.removeListener("trade", this.tradeListener);
       if (this.bookListener) this.adapter.removeListener("orderbook", this.bookListener);
