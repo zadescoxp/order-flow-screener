@@ -4,6 +4,7 @@ import React from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
 import type { Venue, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
 import type { Theme } from "@/lib/theme";
+import { formatPrice } from "@/lib/engine/orderFlowEngine";
 
 // ─── Theme options ───────────────────────────────────────────
 const THEMES: { value: Theme; label: string }[] = [
@@ -49,6 +50,7 @@ function ConnectionStatus() {
   const connections = useTerminalStore((s) => s.connections);
   const ticker = useTerminalStore((s) => s.ticker);
   const venue = useTerminalStore((s) => s.venue);
+  const tickSize = useTerminalStore((s) => s.tickSize);
 
   const conn = connections[venue];
   const status = conn?.status ?? "connecting";
@@ -75,7 +77,7 @@ function ConnectionStatus() {
       </div>
       {ticker && (
         <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
-          {ticker.price.toLocaleString("en-US", { minimumFractionDigits: 1 })}
+          {formatPrice(ticker.price, tickSize)}
         </span>
       )}
     </div>
@@ -98,6 +100,11 @@ export default function TopBar() {
   const setToolProfile = useTerminalStore((s) => s.setToolProfile);
   const theme = useTerminalStore((s) => s.theme);
   const setTheme = useTerminalStore((s) => s.setTheme);
+  const tickMultiplier = useTerminalStore((s) => s.tickMultiplier);
+  const setTickMultiplier = useTerminalStore((s) => s.setTickMultiplier);
+  const zScoreWindow = useTerminalStore((s) => s.zScoreWindow);
+  const setZScoreWindow = useTerminalStore((s) => s.setZScoreWindow);
+  const tickSize = useTerminalStore((s) => s.tickSize);
 
   const assets = marketType === "perpetual" ? ASSETS_PERP : ASSETS_SPOT;
   const venues = marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
@@ -155,11 +162,11 @@ export default function TopBar() {
           }}
         >
           <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
-            {ticker.price.toLocaleString("en-US", { minimumFractionDigits: 1 })}
+            {formatPrice(ticker.price, tickSize)}
           </span>
           <span style={{ fontSize: 10, color: changeColor }}>{changeStr}</span>
           <span style={{ fontSize: 9, color: "var(--text-muted)" }}>
-            O {ticker.open.toFixed(1)} H {ticker.high.toFixed(1)} L {ticker.low.toFixed(1)}
+            O {formatPrice(ticker.open, tickSize)} H {formatPrice(ticker.high, tickSize)} L {formatPrice(ticker.low, tickSize)}
           </span>
         </div>
       )}
@@ -178,6 +185,34 @@ export default function TopBar() {
             {tf}
           </button>
         ))}
+      </div>
+
+      <div className="select-wrap">
+        <select
+          className="terminal-select"
+          value={tickMultiplier}
+          onChange={(e) => setTickMultiplier(Number(e.target.value) as 1 | 2 | 5 | 10)}
+          aria-label="Tick size multiplier"
+        >
+          {[1, 2, 5, 10].map((value) => (
+            <option key={value} value={value}>×{value} tick</option>
+          ))}
+        </select>
+        <span className="select-arrow">▾</span>
+      </div>
+
+      <div className="select-wrap">
+        <select
+          className="terminal-select"
+          value={zScoreWindow}
+          onChange={(e) => setZScoreWindow(Number(e.target.value))}
+          aria-label="Z-score window"
+        >
+          {[20, 50, 100, 200].map((value) => (
+            <option key={value} value={value}>Z {value}</option>
+          ))}
+        </select>
+        <span className="select-arrow">▾</span>
       </div>
 
       <div className="topbar-sep" />

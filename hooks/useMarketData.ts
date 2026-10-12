@@ -15,6 +15,7 @@ export function useMarketData() {
   const timeframe = useTerminalStore((s) => s.timeframe);
   const tickSize = useTerminalStore((s) => s.tickSize);
   const imbalanceThreshold = useTerminalStore((s) => s.imbalanceThreshold);
+  const zScoreWindow = useTerminalStore((s) => s.zScoreWindow);
 
   useEffect(() => {
     marketDataManager.subscribe(
@@ -23,13 +24,14 @@ export function useMarketData() {
       marketType,
       timeframe,
       tickSize,
-      imbalanceThreshold
+      imbalanceThreshold,
+      zScoreWindow
     );
 
     return () => {
       // Don't disconnect on every re-render; manager handles de-duplication
     };
-  }, [symbol, venue, marketType, timeframe, tickSize, imbalanceThreshold]);
+  }, [symbol, venue, marketType, timeframe, tickSize, imbalanceThreshold, zScoreWindow]);
 
   // Cleanup on unmount
   useEffect(() => {

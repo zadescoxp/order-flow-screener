@@ -37,6 +37,7 @@ class MarketDataManager {
   private currentTimeframe: Timeframe = "5m";
   private currentTickSize = 10;
   private currentImbalanceThreshold = 3;
+  private currentZScoreWindow = 20;
 
   // Working candle state
   private currentCandleRef: FootprintCandle | null = null;
@@ -58,13 +59,17 @@ class MarketDataManager {
     marketType: MarketType,
     timeframe: Timeframe,
     tickSize: number,
-    imbalanceThreshold: number
+    imbalanceThreshold: number,
+    zScoreWindow: number
   ): void {
     if (
       this.adapter !== null &&
       this.currentVenue === venue &&
       this.currentSymbol === symbol &&
       this.currentTimeframe === timeframe
+      && this.currentTickSize === tickSize
+      && this.currentImbalanceThreshold === imbalanceThreshold
+      && this.currentZScoreWindow === zScoreWindow
     ) {
       return;
     }
@@ -76,6 +81,7 @@ class MarketDataManager {
     this.currentTimeframe = timeframe;
     this.currentTickSize = tickSize;
     this.currentImbalanceThreshold = imbalanceThreshold;
+    this.currentZScoreWindow = zScoreWindow;
 
     this.adapter = this.createAdapter(venue, symbol, marketType);
     if (!this.adapter) return;
@@ -123,7 +129,12 @@ class MarketDataManager {
   }
 
   private onTrade(trade: NormalizedTrade): void {
-    const store = useTerminalStore.getState();
+    let store = useTerminalStore.getState();
+    if (!this.currentCandleRef) {
+      store.setAutoTickPrice(trade.price);
+      store = useTerminalStore.getState();
+      this.currentTickSize = store.tickSize;
+    }
     store.pushTrade(trade);
 
     const candleOpenTime = getCandleOpenTime(trade.timestamp, this.currentTimeframe);
@@ -146,12 +157,6 @@ class MarketDataManager {
           this.allLevels = this.allLevels.slice(-3000);
         }
 
-        // Volume profile
-        const allCandles = [...store.candles];
-        if (allCandles.length > 0) {
-          const vp = computeVolumeProfile(allCandles);
-          store.setVolumeProfile(vp);
-        }
       }
 
       this.currentCandleRef = createEmptyCandle(candleOpenTime, this.currentTimeframe);
@@ -165,13 +170,24 @@ class MarketDataManager {
       this.currentImbalanceThreshold
     );
 
-    // Apply z-scores
+    // Apply level z-scores against completed levels only.
     if (this.allLevels.length > 1) {
       applyZScores(this.currentCandleRef, this.allLevels);
     }
 
-    // Update store with current candle
+    // Score before adding the current trade to the rolling volume window.
+    const zScore = computeZScore(
+      this.volumeWindow.slice(-this.currentZScoreWindow),
+      trade.quantity
+    );
+    this.volumeWindow.push(trade.quantity);
+    if (this.volumeWindow.length > this.currentZScoreWindow) this.volumeWindow.shift();
+
+    // Update store with current candle and include it in the live profile.
     store.updateCurrentCandle({ ...this.currentCandleRef });
+    store.setVolumeProfile(
+      computeVolumeProfile([...store.candles, { ...this.currentCandleRef }])
+    );
 
     // Update ticker
     store.updateTicker({
@@ -187,10 +203,6 @@ class MarketDataManager {
       timestamp: trade.timestamp,
     });
 
-    // Z-score on volume
-    this.volumeWindow.push(trade.quantity);
-    if (this.volumeWindow.length > 200) this.volumeWindow.shift();
-    const zScore = computeZScore(this.volumeWindow, trade.quantity);
     const zPoint: ZScorePoint = {
       timestamp: trade.timestamp,
       value: zScore,
