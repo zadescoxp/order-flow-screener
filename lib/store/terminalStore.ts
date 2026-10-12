@@ -3,11 +3,11 @@
 // ============================================================
 
 import { create } from "zustand";
-import { persist, subscribeWithSelector } from "zustand/middleware";
+import { subscribeWithSelector } from "zustand/middleware";
 import { type Theme, applyTheme } from "@/lib/theme";
-import { getAutoTickSize } from "@/lib/engine/orderFlowEngine";
 import type {
   Venue,
+  VenueSelection,
   MarketType,
   Timeframe,
   ToolProfile,
@@ -21,21 +21,20 @@ import type {
   ZScorePoint,
   VenueConnection,
   MarketTicker,
-  OrderBookLevel,
 } from "@/lib/types/market";
+import { RingBuffer } from "@/lib/session/RingBuffer";
 
 // ----------------------------------------------------------
 // Terminal Settings
 // ----------------------------------------------------------
 export interface TerminalSettings {
   symbol: string;
-  venue: Venue;
+  venue: VenueSelection;
+  selectedVenues: Venue[];
   marketType: MarketType;
   timeframe: Timeframe;
   toolProfile: ToolProfile;
   tickSize: number;
-  tickBaseSize: number;
-  tickMultiplier: 1 | 2 | 5 | 10;
   imbalanceThreshold: number;
   stackedImbalanceLevels: number;
   zScoreWindow: number;
@@ -70,22 +69,21 @@ export interface MarketDataState {
 export interface TerminalActions {
   // Settings
   setSymbol: (s: string) => void;
-  setVenue: (v: Venue) => void;
+  setVenue: (v: VenueSelection) => void;
+  setSelectedVenues: (venues: Venue[]) => void;
   setMarketType: (m: MarketType) => void;
   setTimeframe: (t: Timeframe) => void;
   setToolProfile: (tp: ToolProfile) => void;
   setTickSize: (ts: number) => void;
-  setTickMultiplier: (multiplier: 1 | 2 | 5 | 10) => void;
-  setAutoTickPrice: (price: number) => void;
   setImbalanceThreshold: (t: number) => void;
   setOrderBookMode: (m: "single" | "aggregated" | "compact") => void;
-  setZScoreWindow: (window: number) => void;
   setPanelVisible: (panel: keyof PanelVisibility, visible: boolean) => void;
   setTheme: (theme: Theme) => void;
 
   // Market data mutations
   pushTrade: (trade: NormalizedTrade) => void;
   updateOrderBook: (book: NormalizedOrderBook) => void;
+  updateAggregatedBook: (book: AggregatedOrderBook | null) => void;
   updateCurrentCandle: (candle: FootprintCandle) => void;
   finalizeCandle: (candle: FootprintCandle) => void;
   setVolumeProfile: (vp: VolumeProfile) => void;
@@ -93,11 +91,24 @@ export interface TerminalActions {
   pushZScore: (z: ZScorePoint) => void;
   updateConnection: (conn: VenueConnection) => void;
   updateTicker: (t: MarketTicker) => void;
+  applyMarketDataBatch: (batch: MarketDataBatch) => void;
   setCrosshair: (time: number | null, price: number | null) => void;
   resetMarketData: () => void;
 }
 
-type TerminalStore = TerminalSettings & MarketDataState & TerminalActions;
+export type TerminalStore = TerminalSettings & MarketDataState & TerminalActions;
+
+export interface MarketDataBatch {
+  trades: NormalizedTrade[];
+  orderBook: NormalizedOrderBook | null;
+  aggregatedBook: AggregatedOrderBook | null;
+  candle: FootprintCandle | null;
+  volumeProfile: VolumeProfile | null;
+  ticker: MarketTicker | null;
+  obi: OBISnapshot | null;
+  zScores: ZScorePoint[];
+  connections: VenueConnection[];
+}
 
 // ----------------------------------------------------------
 // Default panel visibility per tool profile
@@ -138,12 +149,11 @@ const PROFILE_PANELS: Record<ToolProfile, PanelVisibility> = {
 const INITIAL_SETTINGS: TerminalSettings = {
   symbol: "BTCUSDT",
   venue: "bybit-futures",
+  selectedVenues: ["bybit-futures"],
   marketType: "perpetual",
   timeframe: "5m",
   toolProfile: "order-flow",
   tickSize: 10,
-  tickBaseSize: 10,
-  tickMultiplier: 1,
   imbalanceThreshold: 3,
   stackedImbalanceLevels: 3,
   zScoreWindow: 20,
@@ -172,9 +182,10 @@ const INITIAL_MARKET: MarketDataState = {
 // ----------------------------------------------------------
 // Create the store
 // ----------------------------------------------------------
-export const useTerminalStore = create<TerminalStore>()(
-  persist(
-    subscribeWithSelector((set) => ({
+export const createTerminalStore = () => {
+  const recentTradeBuffer = new RingBuffer<NormalizedTrade>(500);
+  return create<TerminalStore>()(
+  subscribeWithSelector((set) => ({
     ...INITIAL_SETTINGS,
     ...INITIAL_MARKET,
 
@@ -183,7 +194,17 @@ export const useTerminalStore = create<TerminalStore>()(
       set((s) => ({ symbol, ...INITIAL_MARKET })),
 
     setVenue: (venue) =>
-      set({ venue, ...INITIAL_MARKET }),
+      set((s) => ({
+        venue,
+        selectedVenues:
+          venue === "all-perps" || venue === "all-spot"
+            ? s.selectedVenues
+            : [venue],
+        ...INITIAL_MARKET,
+      })),
+
+    setSelectedVenues: (selectedVenues) =>
+      set({ selectedVenues, ...INITIAL_MARKET }),
 
     setMarketType: (marketType) =>
       set((s) => {
@@ -193,7 +214,12 @@ export const useTerminalStore = create<TerminalStore>()(
         const newVenue = isValidVenue 
           ? s.venue 
           : (marketType === "perpetual" ? "bybit-futures" : "bybit-spot");
-        return { marketType, venue: newVenue as Venue, ...INITIAL_MARKET };
+        return {
+          marketType,
+          venue: newVenue as Venue,
+          selectedVenues: [newVenue as Venue],
+          ...INITIAL_MARKET,
+        };
       }),
 
     setTimeframe: (timeframe) =>
@@ -202,24 +228,12 @@ export const useTerminalStore = create<TerminalStore>()(
     setToolProfile: (toolProfile) =>
       set({ toolProfile, panels: PROFILE_PANELS[toolProfile] }),
 
-    setTickSize: (tickSize) => set({ tickSize, tickBaseSize: tickSize, tickMultiplier: 1, ...INITIAL_MARKET }),
-
-    setTickMultiplier: (tickMultiplier) =>
-      set((s) => ({ tickMultiplier, tickSize: s.tickBaseSize * tickMultiplier, ...INITIAL_MARKET })),
-
-    setAutoTickPrice: (price) =>
-      set((s) => {
-        const base = Math.max(0.00000001, getAutoTickSize(price));
-        if (Math.abs(base - s.tickBaseSize) < Number.EPSILON) return {};
-        return { tickBaseSize: base, tickSize: base * s.tickMultiplier, ...INITIAL_MARKET };
-      }),
+    setTickSize: (tickSize) => set({ tickSize }),
 
     setImbalanceThreshold: (imbalanceThreshold) =>
       set({ imbalanceThreshold }),
 
     setOrderBookMode: (orderBookMode) => set({ orderBookMode }),
-
-    setZScoreWindow: (zScoreWindow) => set({ zScoreWindow, ...INITIAL_MARKET }),
 
     setPanelVisible: (panel, visible) =>
       set((s) => ({
@@ -233,12 +247,16 @@ export const useTerminalStore = create<TerminalStore>()(
 
     // --- Market Data ---
     pushTrade: (trade) =>
-      set((s) => ({
-        recentTrades: [trade, ...s.recentTrades].slice(0, 500),
-      })),
+      set(() => {
+        recentTradeBuffer.push(trade);
+        return { recentTrades: recentTradeBuffer.newestFirst() };
+      }),
 
     updateOrderBook: (book) =>
       set({ orderBook: book }),
+
+    updateAggregatedBook: (aggregatedBook) =>
+      set({ aggregatedBook }),
 
     updateCurrentCandle: (candle) =>
       set({ currentCandle: candle }),
@@ -269,41 +287,41 @@ export const useTerminalStore = create<TerminalStore>()(
 
     updateTicker: (ticker) => set({ ticker }),
 
+    applyMarketDataBatch: (batch) =>
+      set((s) => {
+        for (const trade of batch.trades) recentTradeBuffer.push(trade);
+        return {
+          recentTrades: batch.trades.length
+            ? recentTradeBuffer.newestFirst()
+            : s.recentTrades,
+          orderBook: batch.orderBook ?? s.orderBook,
+          aggregatedBook: batch.aggregatedBook ?? s.aggregatedBook,
+          currentCandle: batch.candle ?? s.currentCandle,
+          volumeProfile: batch.volumeProfile ?? s.volumeProfile,
+          ticker: batch.ticker ?? s.ticker,
+          currentOBI: batch.obi?.value ?? s.currentOBI,
+          obiHistory: batch.obi
+            ? [...s.obiHistory, batch.obi].slice(-300)
+            : s.obiHistory,
+          zScoreHistory: batch.zScores.length
+            ? [...s.zScoreHistory, ...batch.zScores].slice(-500)
+            : s.zScoreHistory,
+          connections: batch.connections.length
+            ? {
+                ...s.connections,
+                ...Object.fromEntries(batch.connections.map((connection) => [connection.venue, connection])),
+              }
+            : s.connections,
+        };
+      }),
+
     setCrosshair: (crosshairTime, crosshairPrice) =>
       set({ crosshairTime, crosshairPrice }),
 
-    resetMarketData: () => set(INITIAL_MARKET),
-    })),
-    {
-      name: "order-flow-terminal-settings",
-      partialize: (state) => ({
-        symbol: state.symbol,
-        venue: state.venue,
-        marketType: state.marketType,
-        timeframe: state.timeframe,
-        toolProfile: state.toolProfile,
-        tickSize: state.tickSize,
-        tickBaseSize: state.tickBaseSize,
-        tickMultiplier: state.tickMultiplier,
-        imbalanceThreshold: state.imbalanceThreshold,
-        stackedImbalanceLevels: state.stackedImbalanceLevels,
-        zScoreWindow: state.zScoreWindow,
-        orderBookMode: state.orderBookMode,
-        panels: state.panels,
-        theme: state.theme,
-      }),
-      merge: (persisted, current) => {
-        const saved = persisted as Partial<TerminalSettings>;
-        return {
-          ...current,
-          ...saved,
-          tickBaseSize: saved.tickBaseSize ?? saved.tickSize ?? current.tickBaseSize,
-          tickMultiplier: saved.tickMultiplier ?? 1,
-        };
-      },
-      onRehydrateStorage: () => (state) => {
-        if (state && typeof document !== "undefined") applyTheme(state.theme);
-      },
-    }
-  )
-);
+    resetMarketData: () => {
+      recentTradeBuffer.clear();
+      set(INITIAL_MARKET);
+    },
+  }))
+  );
+};

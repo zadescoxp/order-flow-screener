@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback } from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore, useSessionStoreApi } from "@/lib/session/SessionContext";
+import { scheduleCanvasRedraw } from "@/lib/session/canvasScheduler";
 import type { FootprintCandle, FootprintLevel } from "@/lib/types/market";
-import { detectStackedImbalances, formatPrice } from "@/lib/engine/orderFlowEngine";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Footprint Chart — Canvas Renderer ─────────────────────────────
@@ -55,11 +55,11 @@ export default function FootprintChart({ height }: FootprintChartProps) {
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef({ x: 0, y: 0, scroll: 0, scrollY: 0 });
 
-  const candles = useTerminalStore((s) => s.candles);
-  const currentCandle = useTerminalStore((s) => s.currentCandle);
-  const tickSize = useTerminalStore((s) => s.tickSize);
-  const stackedImbalanceLevels = useTerminalStore((s) => s.stackedImbalanceLevels);
-  const setCrosshair = useTerminalStore((s) => s.setCrosshair);
+  const candles = useSessionStore((s) => s.candles);
+  const currentCandle = useSessionStore((s) => s.currentCandle);
+  const tickSize = useSessionStore((s) => s.tickSize);
+  const setCrosshair = useSessionStore((s) => s.setCrosshair);
+  const sessionStore = useSessionStoreApi();
 
   const allCandles = [...candles, ...(currentCandle ? [currentCandle] : [])];
 
@@ -159,20 +159,6 @@ export default function FootprintChart({ height }: FootprintChartProps) {
       ctx.textAlign = "center";
       ctx.fillText(timeStr, x + CANDLE_WIDTH / 2, 11);
 
-      // Draw stacked imbalance bands behind the individual levels.
-      for (const stack of detectStackedImbalances(candle, stackedImbalanceLevels)) {
-        const start = priceIndex.get(stack.endPrice);
-        const end = priceIndex.get(stack.startPrice);
-        if (start === undefined || end === undefined) continue;
-        ctx.fillStyle = stack.direction === "buy" ? COLOR_STACKED_ASK : COLOR_STACKED_BID;
-        ctx.fillRect(
-          x + 1,
-          14 + topOffset + start * LEVEL_HEIGHT,
-          CANDLE_WIDTH - 2,
-          (end - start + 1) * LEVEL_HEIGHT - 1
-        );
-      }
-
       // Draw each price level
       for (const [price, level] of candle.levels) {
         const pi = priceIndex.get(price);
@@ -212,9 +198,9 @@ export default function FootprintChart({ height }: FootprintChartProps) {
       const rowH = BOTTOM_TABLE_HEIGHT / 3;
 
       // Values
-      const deltaStr = candle.delta.toFixed(2);
-      const cumDeltaStr = candle.cumulativeDelta.toFixed(2);
-      const volStr = candle.volume.toFixed(2);
+      const deltaStr = candle.delta.toFixed(1);
+      const cumDeltaStr = candle.cumulativeDelta.toFixed(1);
+      const volStr = candle.volume.toFixed(1);
 
       ctx.textAlign = "right";
       
@@ -260,7 +246,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     for (let i = 0; i < sortedPrices.length; i++) {
       const y = 14 + topOffset + i * LEVEL_HEIGHT + Math.max(9, LEVEL_HEIGHT * 0.45);
       if (y < 20 || y > chartH) continue;
-      ctx.fillText(formatPrice(sortedPrices[i], tickSize), PRICE_COL_WIDTH - 4, y - (LEVEL_HEIGHT * 0.2));
+      ctx.fillText(sortedPrices[i].toLocaleString("en-US", { minimumFractionDigits: 1 }), PRICE_COL_WIDTH - 4, y - (LEVEL_HEIGHT * 0.2));
       
       // grid line
       ctx.strokeStyle = "rgba(30,30,42,0.3)";
@@ -271,12 +257,12 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     }
 
     // Live ticker price line
-    const ticker = useTerminalStore.getState().ticker;
+    const ticker = sessionStore.getState().ticker;
     if (ticker && sortedPrices.length > 0) {
       // Find exact Y coordinate based on interpolation between known ticks or simple index
       // But ticks are rounded. Let's find the nearest level or approximate
       const maxPrice = sortedPrices[0];
-      const tickSize = useTerminalStore.getState().tickSize;
+      const tickSize = sessionStore.getState().tickSize;
       
       // Calculate continuous Y position
       const priceDiff = maxPrice - ticker.price;
@@ -298,7 +284,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         ctx.fillRect(0, currentPriceY - 7, PRICE_COL_WIDTH, 14);
         ctx.fillStyle = bgBase;
         ctx.font = "bold 9px monospace";
-        ctx.fillText(formatPrice(ticker.price, tickSize), PRICE_COL_WIDTH - 4, currentPriceY + 3);
+        ctx.fillText(ticker.price.toLocaleString("en-US", { minimumFractionDigits: 1 }), PRICE_COL_WIDTH - 4, currentPriceY + 3);
       }
     }
 
@@ -321,7 +307,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     ctx.lineTo(W, tableY);
     ctx.stroke();
 
-  }, [allCandles, tickSize, stackedImbalanceLevels]);
+  }, [allCandles, sessionStore, tickSize]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -329,7 +315,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     if (!canvas || !container) return;
     canvas.width = container.clientWidth;
     canvas.height = height;
-    draw();
+    scheduleCanvasRedraw(draw);
   }, [draw, height]);
 
   useEffect(() => {
@@ -339,7 +325,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     const obs = new ResizeObserver(() => {
       canvas.width = container.clientWidth;
       canvas.height = height;
-      draw();
+      scheduleCanvasRedraw(draw);
     });
     obs.observe(container);
     return () => obs.disconnect();
@@ -358,7 +344,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         scrollYRef.current += e.deltaY;
         isLockedToRightRef.current = false;
       }
-      draw();
+      scheduleCanvasRedraw(draw);
     },
     [draw]
   );
@@ -379,7 +365,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         const dy = e.clientY - dragStartRef.current.y;
         scrollRef.current = dragStartRef.current.scroll - dx;
         scrollYRef.current = dragStartRef.current.scrollY - dy;
-        draw();
+        scheduleCanvasRedraw(draw);
         hideTooltip();
         return;
       }
@@ -414,7 +400,10 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         // Are we in the bottom table area?
         if (y >= chartH) {
            const title = "Candle Summary Metrics";
-           const content = `Delta: ${candle.delta.toFixed(1)} (Net Buying/Selling Pressure)\nCum Delta: ${candle.cumulativeDelta.toFixed(1)} (Session Trend)\nTotal Volume: ${candle.volume.toFixed(1)}\n\nWhat this means: Delta shows who is in control for this candle. Positive means aggressive buyers, negative means aggressive sellers.`;
+           const venueVolumeText = Object.entries(candle.venueVolumes)
+             .map(([venue, volume]) => `${venue}: ${(volume ?? 0).toFixed(1)}`)
+             .join("\n");
+           const content = `Delta: ${candle.delta.toFixed(1)} (Net Buying/Selling Pressure)\nCum Delta: ${candle.cumulativeDelta.toFixed(1)} (Session Trend)\nTotal Volume: ${candle.volume.toFixed(1)}\n${venueVolumeText ? `\nVolume by venue:\n${venueVolumeText}` : ""}\n\nWhat this means: Delta shows who is in control for this candle. Positive means aggressive buyers, negative means aggressive sellers.`;
            showTooltip(title, content, e);
            setCrosshair(candle.openTime, null);
            return;
@@ -426,7 +415,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
           setCrosshair(candle.openTime, price);
           const level = candle.levels.get(price);
           if (level) {
-            const title = `Price Level: ${formatPrice(price, tickSize)}`;
+            const title = `Price Level: ${price.toLocaleString()}`;
             const isBuyDom = level.askVolume > level.bidVolume;
             const domText = isBuyDom ? "Buyers (Asks)" : "Sellers (Bids)";
             const content = `Bid Vol: ${level.bidVolume.toFixed(2)}\nAsk Vol: ${level.askVolume.toFixed(2)}\nTotal Vol: ${level.totalVolume.toFixed(2)}\n\nWhat this means: This block shows market orders executed here. ${domText} were more aggressive, creating a ${isBuyDom ? 'positive' : 'negative'} delta of ${(level.askVolume - level.bidVolume).toFixed(2)}.`;
@@ -441,7 +430,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         hideTooltip();
       }
     },
-    [draw, allCandles, setCrosshair, tickSize]
+    [draw, allCandles, setCrosshair]
   );
 
   const handleMouseUp = useCallback(() => {

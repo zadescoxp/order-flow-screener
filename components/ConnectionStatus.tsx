@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore } from "@/lib/session/SessionContext";
 import type { VenueConnection } from "@/lib/types/market";
 
 // ─── Connection Status Bar ────────────────────────────────────────
@@ -28,10 +28,11 @@ function ConnectionDot({ status }: { status: VenueConnection["status"] }) {
 }
 
 export default function ConnectionStatusBar() {
-  const connections = useTerminalStore((s) => s.connections);
+  const connections = useSessionStore((s) => s.connections);
   const entries = Object.values(connections);
+  const selectedVenues = useSessionStore((s) => s.selectedVenues);
 
-  if (entries.length === 0) return null;
+  if (entries.length === 0 && selectedVenues.length === 0) return null;
 
   return (
     <div
@@ -71,6 +72,11 @@ export default function ConnectionStatusBar() {
           </span>
         </div>
       ))}
+      {selectedVenues.length > 1 && (
+        <strong style={{ color: "var(--text-secondary)" }}>
+          {selectedVenues.filter((venue) => connections[venue]?.status === "live").length}/{selectedVenues.length} live
+        </strong>
+      )}
     </div>
   );
 }

@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback, useState } from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore } from "@/lib/session/SessionContext";
+import { useUIStore } from "@/lib/store/uiStore";
+import { scheduleCanvasRedraw } from "@/lib/session/canvasScheduler";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Trades Profile Panel (Canvas) ─────────────────────────────
@@ -13,10 +15,10 @@ type TradesTab = "volume" | "trades";
 export default function TradesProfilePanel() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const recentTrades = useTerminalStore((s) => s.recentTrades);
-  const crosshairPrice = useTerminalStore((s) => s.crosshairPrice);
-  const tickSize = useTerminalStore((s) => s.tickSize);
-  const theme = useTerminalStore((s) => s.theme);
+  const recentTrades = useSessionStore((s) => s.recentTrades);
+  const crosshairPrice = useSessionStore((s) => s.crosshairPrice);
+  const tickSize = useSessionStore((s) => s.tickSize);
+  const theme = useUIStore((s) => s.theme);
   const [tab, setTab] = useState<TradesTab>("volume");
 
   // Aggregate trades by price level
@@ -128,7 +130,7 @@ export default function TradesProfilePanel() {
     if (!canvas || !container) return;
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
-    draw();
+    scheduleCanvasRedraw(draw);
   }, [draw]);
 
   useEffect(() => {
@@ -138,7 +140,7 @@ export default function TradesProfilePanel() {
     const obs = new ResizeObserver(() => {
       canvas.width = container.clientWidth;
       canvas.height = container.clientHeight;
-      draw();
+      scheduleCanvasRedraw(draw);
     });
     obs.observe(container);
     return () => obs.disconnect();

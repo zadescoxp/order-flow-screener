@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useRef, useCallback, useLayoutEffect } from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore } from "@/lib/session/SessionContext";
 import { useMarketData } from "@/hooks/useMarketData";
+import { MarketSessionProvider } from "@/lib/session/SessionContext";
+import { useUIStore } from "@/lib/store/uiStore";
 import { applyTheme } from "@/lib/theme";
 import TopBar from "@/components/TopBar";
 import FootprintChart from "@/components/FootprintChart";
@@ -13,16 +15,21 @@ import DepthOfMarket from "@/components/DepthOfMarket";
 import VolatilityPanel from "@/components/VolatilityPanel";
 import TradesProfilePanel from "@/components/TradesProfile";
 import GlobalTooltip from "@/components/GlobalTooltip";
-import { formatPrice } from "@/lib/engine/orderFlowEngine";
+import ConnectionStatusBar from "@/components/ConnectionStatus";
+import type { MarketTicker, PanelVisibility } from "@/lib/types/market";
 
 // ─── Main Terminal Layout ────────────────────────────────────────
 // Flex layout for resizable panels
 
 export default function Terminal() {
+  return <MarketSessionProvider><SessionTerminal /></MarketSessionProvider>;
+}
+
+function SessionTerminal() {
   useMarketData();
 
-  const panels = useTerminalStore((s) => s.panels);
-  const theme = useTerminalStore((s) => s.theme);
+  const panels = useUIStore((s) => s.panels);
+  const theme = useUIStore((s) => s.theme);
 
   // Apply theme immediately before paint — directly sets CSS vars on :root
   useLayoutEffect(() => {
@@ -42,6 +49,9 @@ export default function Terminal() {
     >
       <GlobalTooltip />
       <TopBar />
+      <div style={{ padding: "3px 10px", background: "var(--bg-base)" }}>
+        <ConnectionStatusBar />
+      </div>
 
       <div
         style={{
@@ -108,13 +118,12 @@ export default function Terminal() {
 }
 
 // ─── Center Column ───────────────────────────────────────────────
-function CenterColumn({ panels }: { panels: ReturnType<typeof useTerminalStore.getState>["panels"] }) {
-  const ticker = useTerminalStore((s) => s.ticker);
-  const symbol = useTerminalStore((s) => s.symbol);
-  const venue = useTerminalStore((s) => s.venue);
-  const timeframe = useTerminalStore((s) => s.timeframe);
-  const marketType = useTerminalStore((s) => s.marketType);
-  const tickSize = useTerminalStore((s) => s.tickSize);
+function CenterColumn({ panels }: { panels: PanelVisibility }) {
+  const ticker = useSessionStore((s) => s.ticker);
+  const symbol = useSessionStore((s) => s.symbol);
+  const venue = useSessionStore((s) => s.venue);
+  const timeframe = useSessionStore((s) => s.timeframe);
+  const marketType = useSessionStore((s) => s.marketType);
 
   return (
     <div
@@ -134,7 +143,6 @@ function CenterColumn({ panels }: { panels: ReturnType<typeof useTerminalStore.g
         timeframe={timeframe}
         marketType={marketType}
         ticker={ticker}
-        tickSize={tickSize}
       />
 
       <div
@@ -189,14 +197,12 @@ function ChartHeader({
   timeframe,
   marketType,
   ticker,
-  tickSize,
 }: {
   symbol: string;
   venue: string;
   timeframe: string;
   marketType: string;
-  ticker: ReturnType<typeof useTerminalStore.getState>["ticker"];
-  tickSize: number;
+  ticker: MarketTicker | null;
 }) {
   const formattedVenue = venue
     .split("-")
@@ -231,25 +237,25 @@ function ChartHeader({
           <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>
             O{" "}
             <span style={{ color: "var(--text-secondary)" }}>
-              {formatPrice(ticker.open, tickSize)}
+              {ticker.open.toFixed(1)}
             </span>
           </span>
           <span style={{ color: "var(--text-muted)" }}>
             H{" "}
             <span style={{ color: "var(--buy)" }}>
-              {formatPrice(ticker.high, tickSize)}
+              {ticker.high.toFixed(1)}
             </span>
           </span>
           <span style={{ color: "var(--text-muted)" }}>
             L{" "}
             <span style={{ color: "var(--sell)" }}>
-              {formatPrice(ticker.low, tickSize)}
+              {ticker.low.toFixed(1)}
             </span>
           </span>
           <span style={{ color: "var(--text-muted)" }}>
             C{" "}
             <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-              {formatPrice(ticker.price, tickSize)}
+              {ticker.price.toFixed(1)}
             </span>
           </span>
         </>

@@ -1,4 +1,4 @@
-import type { MarketType, Venue } from "@/lib/types/market";
+import type { MarketType, Venue, VenueSelection } from "@/lib/types/market";
 
 const PERPETUAL_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT", "LINKUSDT", "ARBUSDT", "OPUSDT"];
 const SPOT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
@@ -21,4 +21,16 @@ export function venueSupports(
   if (marketType === "perpetual" && !PERPETUAL_SYMBOLS.includes(normalized)) return false;
   if (marketType === "spot" && !SPOT_SYMBOLS.includes(normalized)) return false;
   return true;
+}
+
+export function venuesForSelection(
+  selection: VenueSelection,
+  marketType: MarketType,
+  symbol: string
+): Venue[] {
+  const venues: Venue[] = marketType === "perpetual"
+    ? ["binance-futures", "bybit-futures", "okx-futures", "hyperliquid", "bitget-futures", "deribit"]
+    : ["binance-spot", "coinbase-spot", "okx-spot", "bybit-spot", "bitget-spot"];
+  if (selection !== "all-perps" && selection !== "all-spot") return [selection];
+  return venues.filter((venue) => venueSupports(venue, symbol, marketType));
 }

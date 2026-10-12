@@ -1,11 +1,11 @@
 "use client";
 
 import React from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
-import type { Venue, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
+import { useSessionStore } from "@/lib/session/SessionContext";
+import type { Venue, VenueSelection, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
 import type { Theme } from "@/lib/theme";
-import { formatPrice } from "@/lib/engine/orderFlowEngine";
 import { venueSupports } from "@/lib/adapters/capabilities";
+import { useUIStore } from "@/lib/store/uiStore";
 
 // ─── Theme options ───────────────────────────────────────────
 const THEMES: { value: Theme; label: string }[] = [
@@ -48,13 +48,16 @@ const PROFILES: { value: ToolProfile; label: string }[] = [
 
 // ─── Status bar ───────────────────────────────────────────
 function ConnectionStatus() {
-  const connections = useTerminalStore((s) => s.connections);
-  const ticker = useTerminalStore((s) => s.ticker);
-  const venue = useTerminalStore((s) => s.venue);
-  const tickSize = useTerminalStore((s) => s.tickSize);
-
+  const connections = useSessionStore((s) => s.connections);
+  const ticker = useSessionStore((s) => s.ticker);
+  const venue = useSessionStore((s) => s.venue);
+  const selectedVenues = useSessionStore((s) => s.selectedVenues);
+  const selectedConnections = selectedVenues.map((selected) => connections[selected]).filter(Boolean);
+  const liveCount = selectedConnections.filter((connection) => connection.status === "live").length;
+  const status = venue === "all-perps" || venue === "all-spot"
+    ? liveCount === selectedVenues.length && selectedVenues.length > 0 ? "live" : "connecting"
+    : connections[venue]?.status ?? "connecting";
   const conn = connections[venue];
-  const status = conn?.status ?? "connecting";
 
   return (
     <div className="flex items-center gap-3 ml-auto">
@@ -70,7 +73,9 @@ function ConnectionStatus() {
           }}
         >
           {status === "live"
-            ? "LIVE"
+            ? venue === "all-perps" || venue === "all-spot"
+              ? `${liveCount}/${selectedVenues.length} LIVE`
+              : "LIVE"
             : status === "connecting"
             ? "CONNECTING"
             : status.toUpperCase()}
@@ -78,7 +83,7 @@ function ConnectionStatus() {
       </div>
       {ticker && (
         <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
-          {formatPrice(ticker.price, tickSize)}
+          {ticker.price.toLocaleString("en-US", { minimumFractionDigits: 1 })}
         </span>
       )}
     </div>
@@ -87,28 +92,26 @@ function ConnectionStatus() {
 
 // ─── Top Bar ─────────────────────────────────────────────
 export default function TopBar() {
-  const symbol = useTerminalStore((s) => s.symbol);
-  const venue = useTerminalStore((s) => s.venue);
-  const marketType = useTerminalStore((s) => s.marketType);
-  const timeframe = useTerminalStore((s) => s.timeframe);
-  const toolProfile = useTerminalStore((s) => s.toolProfile);
-  const ticker = useTerminalStore((s) => s.ticker);
+  const symbol = useSessionStore((s) => s.symbol);
+  const venue = useSessionStore((s) => s.venue);
+  const selectedVenues = useSessionStore((s) => s.selectedVenues);
+  const marketType = useSessionStore((s) => s.marketType);
+  const timeframe = useSessionStore((s) => s.timeframe);
+  const toolProfile = useUIStore((s) => s.toolProfile);
+  const ticker = useSessionStore((s) => s.ticker);
 
-  const setSymbol = useTerminalStore((s) => s.setSymbol);
-  const setVenue = useTerminalStore((s) => s.setVenue);
-  const setMarketType = useTerminalStore((s) => s.setMarketType);
-  const setTimeframe = useTerminalStore((s) => s.setTimeframe);
-  const setToolProfile = useTerminalStore((s) => s.setToolProfile);
-  const theme = useTerminalStore((s) => s.theme);
-  const setTheme = useTerminalStore((s) => s.setTheme);
-  const tickMultiplier = useTerminalStore((s) => s.tickMultiplier);
-  const setTickMultiplier = useTerminalStore((s) => s.setTickMultiplier);
-  const zScoreWindow = useTerminalStore((s) => s.zScoreWindow);
-  const setZScoreWindow = useTerminalStore((s) => s.setZScoreWindow);
-  const tickSize = useTerminalStore((s) => s.tickSize);
+  const setSymbol = useSessionStore((s) => s.setSymbol);
+  const setVenue = useSessionStore((s) => s.setVenue);
+  const setSelectedVenues = useSessionStore((s) => s.setSelectedVenues);
+  const setMarketType = useSessionStore((s) => s.setMarketType);
+  const setTimeframe = useSessionStore((s) => s.setTimeframe);
+  const setToolProfile = useUIStore((s) => s.setToolProfile);
+  const theme = useUIStore((s) => s.theme);
+  const setTheme = useUIStore((s) => s.setTheme);
 
   const assets = marketType === "perpetual" ? ASSETS_PERP : ASSETS_SPOT;
   const venues = marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
+  const aggregateValue: VenueSelection = marketType === "perpetual" ? "all-perps" : "all-spot";
 
   const changeStr =
     ticker
@@ -163,11 +166,11 @@ export default function TopBar() {
           }}
         >
           <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
-            {formatPrice(ticker.price, tickSize)}
+            {ticker.price.toLocaleString("en-US", { minimumFractionDigits: 1 })}
           </span>
           <span style={{ fontSize: 10, color: changeColor }}>{changeStr}</span>
           <span style={{ fontSize: 9, color: "var(--text-muted)" }}>
-            O {formatPrice(ticker.open, tickSize)} H {formatPrice(ticker.high, tickSize)} L {formatPrice(ticker.low, tickSize)}
+            O {ticker.open.toFixed(1)} H {ticker.high.toFixed(1)} L {ticker.low.toFixed(1)}
           </span>
         </div>
       )}
@@ -186,34 +189,6 @@ export default function TopBar() {
             {tf}
           </button>
         ))}
-      </div>
-
-      <div className="select-wrap">
-        <select
-          className="terminal-select"
-          value={tickMultiplier}
-          onChange={(e) => setTickMultiplier(Number(e.target.value) as 1 | 2 | 5 | 10)}
-          aria-label="Tick size multiplier"
-        >
-          {[1, 2, 5, 10].map((value) => (
-            <option key={value} value={value}>×{value} tick</option>
-          ))}
-        </select>
-        <span className="select-arrow">▾</span>
-      </div>
-
-      <div className="select-wrap">
-        <select
-          className="terminal-select"
-          value={zScoreWindow}
-          onChange={(e) => setZScoreWindow(Number(e.target.value))}
-          aria-label="Z-score window"
-        >
-          {[20, 50, 100, 200].map((value) => (
-            <option key={value} value={value}>Z {value}</option>
-          ))}
-        </select>
-        <span className="select-arrow">▾</span>
       </div>
 
       <div className="topbar-sep" />
@@ -239,9 +214,22 @@ export default function TopBar() {
         <select
           className="terminal-select"
           value={venue}
-          onChange={(e) => setVenue(e.target.value as Venue)}
+          onChange={(e) => {
+            const nextVenue = e.target.value as VenueSelection;
+            setVenue(nextVenue);
+            if (nextVenue === aggregateValue) {
+              setSelectedVenues(
+                venues
+                  .filter((candidate) => venueSupports(candidate.value, symbol, marketType))
+                  .map((candidate) => candidate.value)
+              );
+            }
+          }}
           id="venue-selector"
         >
+          <option value={aggregateValue}>
+            {marketType === "perpetual" ? "All perps" : "All spot"}
+          </option>
           {venues.map((v) => (
             <option
               key={v.value}
@@ -255,12 +243,34 @@ export default function TopBar() {
         <span className="select-arrow">▾</span>
       </div>
 
+      {(venue === "all-perps" || venue === "all-spot") && (
+        <div style={{ display: "flex", gap: 2 }}>
+          {venues.map((v) => {
+            const enabled = selectedVenues.includes(v.value);
+            return (
+              <button
+                key={v.value}
+                className={`tab ${enabled ? "active" : ""}`}
+                onClick={() => setSelectedVenues(
+                  enabled
+                    ? selectedVenues.filter((selected) => selected !== v.value)
+                    : [...selectedVenues, v.value]
+                )}
+                title={`${enabled ? "Exclude" : "Include"} ${v.label}`}
+              >
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="topbar-sep" />
 
       {/* ── Tool Profile Toggles ── */}
       <div className="tab-group" style={{ display: "flex", gap: 2 }}>
         {PROFILES.map((p) => {
-          const currentPanels = useTerminalStore.getState().panels;
+          const currentPanels = useUIStore.getState().panels;
           const isProfileActive = 
               p.value === "order-flow" ? currentPanels.footprint && currentPanels.orderBook && currentPanels.tradesProfile
             : p.value === "liquidity" ? currentPanels.heatmap
@@ -278,7 +288,7 @@ export default function TopBar() {
                   : { volatility: true, footprint: true, volumeProfile: true, heatmap: true };
                 
                 // Toggle logic: if active, turn these specific panels off, else turn them on
-                const setPanelVisible = useTerminalStore.getState().setPanelVisible;
+                const setPanelVisible = useUIStore.getState().setPanelVisible;
                 Object.entries(targetPanels).forEach(([key, val]) => {
                   setPanelVisible(key as any, !isProfileActive ? val : false);
                 });
@@ -334,7 +344,7 @@ export default function TopBar() {
           𝕏 @zadescoxp
         </a>
         <a
-          href="https://github.com/zadescoxp/order-flow-screener"
+          href="https://github.com"
           target="_blank"
           rel="noopener noreferrer"
           className="btn"

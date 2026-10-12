@@ -96,6 +96,7 @@ export function createEmptyCandle(
     tradeCount: 0,
     maxVolumeAtLevel: 0,
     complete: false,
+    venueVolumes: {},
   };
 }
 
@@ -163,6 +164,8 @@ export function applyTradeToCandle(
 
   // Update candle totals
   candle.volume += trade.quantity;
+  candle.venueVolumes[trade.venue] =
+    (candle.venueVolumes[trade.venue] ?? 0) + trade.quantity;
   candle.tradeCount += 1;
   if (trade.side === "buy") {
     candle.delta += trade.quantity;

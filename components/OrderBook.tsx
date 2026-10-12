@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback } from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore, useSessionStoreApi } from "@/lib/session/SessionContext";
 import type { NormalizedOrderBook } from "@/lib/types/market";
 import { formatPrice as formatTickPrice } from "@/lib/engine/orderFlowEngine";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
@@ -19,13 +19,13 @@ function formatSize(v: number): string {
 const MAX_LEVELS = 20;
 
 export default function OrderBookPanel() {
-  const orderBook = useTerminalStore((s) => s.orderBook);
-  const orderBookMode = useTerminalStore((s) => s.orderBookMode);
-  const setOrderBookMode = useTerminalStore((s) => s.setOrderBookMode);
-  const ticker = useTerminalStore((s) => s.ticker);
-
-  const displayBook = orderBookMode === "aggregated" && useTerminalStore.getState().aggregatedBook 
-    ? useTerminalStore.getState().aggregatedBook 
+  const orderBook = useSessionStore((s) => s.orderBook);
+  const orderBookMode = useSessionStore((s) => s.orderBookMode);
+  const setOrderBookMode = useSessionStore((s) => s.setOrderBookMode);
+  const ticker = useSessionStore((s) => s.ticker);
+  const sessionStore = useSessionStoreApi();
+  const displayBook = orderBookMode === "aggregated" && sessionStore.getState().aggregatedBook 
+    ? sessionStore.getState().aggregatedBook 
     : orderBook;
 
   if (!displayBook) {
@@ -43,7 +43,7 @@ export default function OrderBookPanel() {
   }
 
   // Grouping logic for Compact mode
-  const tickSize = useTerminalStore.getState().tickSize;
+  const tickSize = sessionStore.getState().tickSize;
   const groupFactor = orderBookMode === "compact" ? 10 : (orderBookMode === "aggregated" ? 5 : 1);
   const effectiveTickSize = tickSize * groupFactor;
 

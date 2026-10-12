@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback } from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore } from "@/lib/session/SessionContext";
+import { useUIStore } from "@/lib/store/uiStore";
+import { scheduleCanvasRedraw } from "@/lib/session/canvasScheduler";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Depth of Market (Canvas) ───────────────────────────────────
@@ -10,10 +12,10 @@ import { showTooltip, hideTooltip } from "./GlobalTooltip";
 export default function DepthOfMarket() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const orderBook = useTerminalStore((s) => s.orderBook);
-  const crosshairPrice = useTerminalStore((s) => s.crosshairPrice);
-  const ticker = useTerminalStore((s) => s.ticker);
-  const theme = useTerminalStore((s) => s.theme);
+  const orderBook = useSessionStore((s) => s.orderBook);
+  const crosshairPrice = useSessionStore((s) => s.crosshairPrice);
+  const ticker = useSessionStore((s) => s.ticker);
+  const theme = useUIStore((s) => s.theme);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -174,7 +176,7 @@ export default function DepthOfMarket() {
     if (!canvas || !container) return;
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
-    draw();
+    scheduleCanvasRedraw(draw);
   }, [draw]);
 
   useEffect(() => {
@@ -184,7 +186,7 @@ export default function DepthOfMarket() {
     const obs = new ResizeObserver(() => {
       canvas.width = container.clientWidth;
       canvas.height = container.clientHeight;
-      draw();
+      scheduleCanvasRedraw(draw);
     });
     obs.observe(container);
     return () => obs.disconnect();
