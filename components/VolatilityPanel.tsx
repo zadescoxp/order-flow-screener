@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useCallback, useState } from "react";
 import { useSessionStore } from "@/lib/session/SessionContext";
 import { useUIStore } from "@/lib/store/uiStore";
+import { scheduleCanvasRedraw } from "@/lib/session/canvasScheduler";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Volatility / Z-Score Panel (Canvas) ────────────────────────
@@ -163,7 +164,7 @@ export default function VolatilityPanel() {
     if (!canvas || !container) return;
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
-    draw();
+    scheduleCanvasRedraw(draw);
   }, [draw]);
 
   useEffect(() => {
@@ -173,7 +174,7 @@ export default function VolatilityPanel() {
     const obs = new ResizeObserver(() => {
       canvas.width = container.clientWidth;
       canvas.height = container.clientHeight;
-      draw();
+      scheduleCanvasRedraw(draw);
     });
     obs.observe(container);
     return () => obs.disconnect();

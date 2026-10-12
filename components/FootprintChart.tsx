@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useCallback } from "react";
 import { useSessionStore, useSessionStoreApi } from "@/lib/session/SessionContext";
+import { scheduleCanvasRedraw } from "@/lib/session/canvasScheduler";
 import type { FootprintCandle, FootprintLevel } from "@/lib/types/market";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
@@ -313,7 +314,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     if (!canvas || !container) return;
     canvas.width = container.clientWidth;
     canvas.height = height;
-    draw();
+    scheduleCanvasRedraw(draw);
   }, [draw, height]);
 
   useEffect(() => {
@@ -323,7 +324,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     const obs = new ResizeObserver(() => {
       canvas.width = container.clientWidth;
       canvas.height = height;
-      draw();
+      scheduleCanvasRedraw(draw);
     });
     obs.observe(container);
     return () => obs.disconnect();
@@ -342,7 +343,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         scrollYRef.current += e.deltaY;
         isLockedToRightRef.current = false;
       }
-      draw();
+      scheduleCanvasRedraw(draw);
     },
     [draw]
   );
@@ -363,7 +364,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         const dy = e.clientY - dragStartRef.current.y;
         scrollRef.current = dragStartRef.current.scroll - dx;
         scrollYRef.current = dragStartRef.current.scrollY - dy;
-        draw();
+        scheduleCanvasRedraw(draw);
         hideTooltip();
         return;
       }
