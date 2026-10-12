@@ -91,7 +91,7 @@ export interface TerminalActions {
   resetMarketData: () => void;
 }
 
-type TerminalStore = TerminalSettings & MarketDataState & TerminalActions;
+export type TerminalStore = TerminalSettings & MarketDataState & TerminalActions;
 
 // ----------------------------------------------------------
 // Default panel visibility per tool profile
@@ -164,7 +164,7 @@ const INITIAL_MARKET: MarketDataState = {
 // ----------------------------------------------------------
 // Create the store
 // ----------------------------------------------------------
-export const useTerminalStore = create<TerminalStore>()(
+export const createTerminalStore = () => create<TerminalStore>()(
   subscribeWithSelector((set) => ({
     ...INITIAL_SETTINGS,
     ...INITIAL_MARKET,
@@ -254,3 +254,5 @@ export const useTerminalStore = create<TerminalStore>()(
     resetMarketData: () => set(INITIAL_MARKET),
   }))
 );
+
+export const useTerminalStore = createTerminalStore();

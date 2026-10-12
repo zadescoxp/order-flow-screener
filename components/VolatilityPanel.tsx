@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback, useState } from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore } from "@/lib/session/SessionContext";
+import { useUIStore } from "@/lib/store/uiStore";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── Volatility / Z-Score Panel (Canvas) ────────────────────────
@@ -33,9 +34,9 @@ function zScoreColor(z: number): string {
 export default function VolatilityPanel() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const zScoreHistory = useTerminalStore((s) => s.zScoreHistory);
-  const crosshairTime = useTerminalStore((s) => s.crosshairTime);
-  const theme = useTerminalStore((s) => s.theme);
+  const zScoreHistory = useSessionStore((s) => s.zScoreHistory);
+  const crosshairTime = useSessionStore((s) => s.crosshairTime);
+  const theme = useUIStore((s) => s.theme);
   const [tab, setTab] = useState<ZTab>("zscore");
   const [window, setWindow] = useState<ZWindow>(20);
 

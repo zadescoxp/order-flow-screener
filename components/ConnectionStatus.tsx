@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore } from "@/lib/session/SessionContext";
 import type { VenueConnection } from "@/lib/types/market";
 
 // ─── Connection Status Bar ────────────────────────────────────────
@@ -28,7 +28,7 @@ function ConnectionDot({ status }: { status: VenueConnection["status"] }) {
 }
 
 export default function ConnectionStatusBar() {
-  const connections = useTerminalStore((s) => s.connections);
+  const connections = useSessionStore((s) => s.connections);
   const entries = Object.values(connections);
 
   if (entries.length === 0) return null;

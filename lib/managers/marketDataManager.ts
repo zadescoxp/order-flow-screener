@@ -6,8 +6,8 @@
 
 "use client";
 
-import { createAdapter } from "@/lib/adapters/exchanges";
 import { venueSupports } from "@/lib/adapters/capabilities";
+import { acquireAdapter, releaseAdapter } from "@/lib/session/adapterPool";
 import type { BaseExchangeAdapter } from "@/lib/adapters/base";
 import {
   getCandleOpenTime,
@@ -19,6 +19,8 @@ import {
   computeZScore,
 } from "@/lib/engine/orderFlowEngine";
 import { useTerminalStore } from "@/lib/store/terminalStore";
+import type { TerminalStore } from "@/lib/store/terminalStore";
+import type { StoreApi } from "zustand";
 import type {
   Venue,
   Timeframe,
@@ -31,10 +33,12 @@ import type {
   ZScorePoint,
 } from "@/lib/types/market";
 
-class MarketDataManager {
+export class MarketDataManager {
+  private readonly store: StoreApi<TerminalStore>;
   private adapter: BaseExchangeAdapter | null = null;
   private currentSymbol = "";
   private currentVenue: Venue | null = null;
+  private currentMarketType: MarketType = "perpetual";
   private currentTimeframe: Timeframe = "5m";
   private currentTickSize = 10;
   private currentImbalanceThreshold = 3;
@@ -52,6 +56,22 @@ class MarketDataManager {
 
   // Cumulative delta
   private cumulativeDelta = 0;
+  private paused = false;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingTrades: NormalizedTrade[] = [];
+  private pendingOrderBook: NormalizedOrderBook | null = null;
+  private pendingConnection: Parameters<TerminalStore["updateConnection"]>[0] | null = null;
+  private pendingCandle: FootprintCandle | null = null;
+  private pendingTicker: Parameters<TerminalStore["updateTicker"]>[0] | null = null;
+  private pendingOBI: OBISnapshot | null = null;
+  private pendingZScores: ZScorePoint[] = [];
+  private tradeListener: ((trade: NormalizedTrade) => void) | null = null;
+  private bookListener: ((book: NormalizedOrderBook) => void) | null = null;
+  private statusListener: ((conn: Parameters<TerminalStore["updateConnection"]>[0]) => void) | null = null;
+
+  constructor(store: StoreApi<TerminalStore>) {
+    this.store = store;
+  }
 
   subscribe(
     venue: Venue,
@@ -62,7 +82,7 @@ class MarketDataManager {
     imbalanceThreshold: number
   ): void {
     if (!venueSupports(venue, symbol, marketType)) {
-      useTerminalStore.getState().updateConnection({
+      this.store.getState().updateConnection({
         venue,
         status: "error",
         lastHeartbeat: 0,
@@ -84,47 +104,47 @@ class MarketDataManager {
 
     this.currentVenue = venue;
     this.currentSymbol = symbol;
+    this.currentMarketType = marketType;
     this.currentTimeframe = timeframe;
     this.currentTickSize = tickSize;
     this.currentImbalanceThreshold = imbalanceThreshold;
 
-    this.adapter = this.createAdapter(venue, symbol, marketType);
+    this.adapter = acquireAdapter(venue, symbol, marketType);
     if (!this.adapter) return;
 
-    this.adapter.on("trade", (trade: NormalizedTrade) => {
+    this.tradeListener = (trade: NormalizedTrade) => {
       this.onTrade(trade);
-    });
+    };
+    this.adapter.on("trade", this.tradeListener);
 
-    this.adapter.on("orderbook", (book: NormalizedOrderBook) => {
+    this.bookListener = (book: NormalizedOrderBook) => {
       this.onOrderBook(book);
-    });
+    };
+    this.adapter.on("orderbook", this.bookListener);
 
-    this.adapter.on("status", (conn) => {
-      useTerminalStore.getState().updateConnection(conn);
-    });
+    this.statusListener = (conn) => {
+      this.pendingConnection = conn;
+      this.scheduleFlush();
+    };
+    this.adapter.on("status", this.statusListener);
 
-    this.adapter.connect();
   }
 
   disconnect(): void {
     if (this.adapter) {
-      this.adapter.disconnect();
-      this.adapter.removeAllListeners();
+      if (this.tradeListener) this.adapter.removeListener("trade", this.tradeListener);
+      if (this.bookListener) this.adapter.removeListener("orderbook", this.bookListener);
+      if (this.statusListener) this.adapter.removeListener("status", this.statusListener);
+      if (this.currentVenue) {
+        releaseAdapter(this.currentVenue, this.currentSymbol, this.currentMarketType);
+      }
       this.adapter = null;
     }
     this.currentCandleRef = null;
     this.allLevels = [];
     this.volumeWindow = [];
     this.cumulativeDelta = 0;
-    useTerminalStore.getState().resetMarketData();
-  }
-
-  private createAdapter(
-    venue: Venue,
-    symbol: string,
-    _marketType: MarketType
-  ): BaseExchangeAdapter | null {
-    return createAdapter(venue, symbol);
+    this.store.getState().resetMarketData();
   }
 
   private toOKXSymbol(symbol: string, type: "perpetual" | "spot"): string {
@@ -134,8 +154,8 @@ class MarketDataManager {
   }
 
   private onTrade(trade: NormalizedTrade): void {
-    const store = useTerminalStore.getState();
-    store.pushTrade(trade);
+    if (this.paused) return;
+    const store = this.store.getState();
 
     const candleOpenTime = getCandleOpenTime(trade.timestamp, this.currentTimeframe);
 
@@ -182,10 +202,10 @@ class MarketDataManager {
     }
 
     // Update store with current candle
-    store.updateCurrentCandle({ ...this.currentCandleRef });
+    this.pendingCandle = { ...this.currentCandleRef };
 
     // Update ticker
-    store.updateTicker({
+    this.pendingTicker = {
       venue: trade.venue,
       symbol: trade.symbol,
       price: trade.price,
@@ -196,7 +216,7 @@ class MarketDataManager {
       changePct: ((trade.price - this.currentCandleRef.open) / this.currentCandleRef.open) * 100,
       volume: this.currentCandleRef.volume,
       timestamp: trade.timestamp,
-    });
+    };
 
     // Z-score on volume
     this.volumeWindow.push(trade.quantity);
@@ -207,12 +227,13 @@ class MarketDataManager {
       value: zScore,
       volume: trade.quantity,
     };
-    store.pushZScore(zPoint);
+    this.pendingZScores.push(zPoint);
+    this.pendingTrades.push(trade);
+    this.scheduleFlush();
   }
 
   private onOrderBook(book: NormalizedOrderBook): void {
-    const store = useTerminalStore.getState();
-    store.updateOrderBook(book);
+    if (this.paused) return;
 
     // Compute OBI from top N levels
     const topN = 10;
@@ -226,9 +247,53 @@ class MarketDataManager {
       bidVolume: bidVol,
       askVolume: askVol,
     };
-    store.pushOBI(snap);
+    this.pendingOrderBook = book;
+    this.pendingOBI = snap;
+    this.scheduleFlush();
+  }
+
+  pause(): void {
+    this.paused = true;
+  }
+
+  resume(): void {
+    this.paused = false;
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer || this.paused) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      const store = this.store.getState();
+      if (this.pendingTrades.length) {
+        for (const trade of this.pendingTrades) store.pushTrade(trade);
+        this.pendingTrades = [];
+      }
+      if (this.pendingOrderBook) {
+        store.updateOrderBook(this.pendingOrderBook);
+        this.pendingOrderBook = null;
+      }
+      if (this.pendingCandle) {
+        store.updateCurrentCandle(this.pendingCandle);
+        this.pendingCandle = null;
+      }
+      if (this.pendingTicker) {
+        store.updateTicker(this.pendingTicker);
+        this.pendingTicker = null;
+      }
+      if (this.pendingOBI) {
+        store.pushOBI(this.pendingOBI);
+        this.pendingOBI = null;
+      }
+      for (const point of this.pendingZScores) store.pushZScore(point);
+      this.pendingZScores = [];
+      if (this.pendingConnection) {
+        store.updateConnection(this.pendingConnection);
+        this.pendingConnection = null;
+      }
+    }, 50);
   }
 }
 
-// Singleton instance
-export const marketDataManager = new MarketDataManager();
+export const marketDataManager = new MarketDataManager(useTerminalStore);

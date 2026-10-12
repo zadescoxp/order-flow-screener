@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback } from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore } from "@/lib/session/SessionContext";
+import { useUIStore } from "@/lib/store/uiStore";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
 // ─── OBI Panel (Order Book Imbalance) ───────────────────────────
@@ -10,9 +11,9 @@ import { showTooltip, hideTooltip } from "./GlobalTooltip";
 export default function OBIPanel() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const obiHistory = useTerminalStore((s) => s.obiHistory);
-  const currentOBI = useTerminalStore((s) => s.currentOBI);
-  const theme = useTerminalStore((s) => s.theme);
+  const obiHistory = useSessionStore((s) => s.obiHistory);
+  const currentOBI = useSessionStore((s) => s.currentOBI);
+  const theme = useUIStore((s) => s.theme);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;

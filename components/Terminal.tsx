@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useRef, useCallback, useLayoutEffect } from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore } from "@/lib/session/SessionContext";
 import { useMarketData } from "@/hooks/useMarketData";
+import { MarketSessionProvider } from "@/lib/session/SessionContext";
+import { useUIStore } from "@/lib/store/uiStore";
 import { applyTheme } from "@/lib/theme";
 import TopBar from "@/components/TopBar";
 import FootprintChart from "@/components/FootprintChart";
@@ -13,15 +15,20 @@ import DepthOfMarket from "@/components/DepthOfMarket";
 import VolatilityPanel from "@/components/VolatilityPanel";
 import TradesProfilePanel from "@/components/TradesProfile";
 import GlobalTooltip from "@/components/GlobalTooltip";
+import type { MarketTicker, PanelVisibility } from "@/lib/types/market";
 
 // ─── Main Terminal Layout ────────────────────────────────────────
 // Flex layout for resizable panels
 
 export default function Terminal() {
+  return <MarketSessionProvider><SessionTerminal /></MarketSessionProvider>;
+}
+
+function SessionTerminal() {
   useMarketData();
 
-  const panels = useTerminalStore((s) => s.panels);
-  const theme = useTerminalStore((s) => s.theme);
+  const panels = useUIStore((s) => s.panels);
+  const theme = useUIStore((s) => s.theme);
 
   // Apply theme immediately before paint — directly sets CSS vars on :root
   useLayoutEffect(() => {
@@ -107,12 +114,12 @@ export default function Terminal() {
 }
 
 // ─── Center Column ───────────────────────────────────────────────
-function CenterColumn({ panels }: { panels: ReturnType<typeof useTerminalStore.getState>["panels"] }) {
-  const ticker = useTerminalStore((s) => s.ticker);
-  const symbol = useTerminalStore((s) => s.symbol);
-  const venue = useTerminalStore((s) => s.venue);
-  const timeframe = useTerminalStore((s) => s.timeframe);
-  const marketType = useTerminalStore((s) => s.marketType);
+function CenterColumn({ panels }: { panels: PanelVisibility }) {
+  const ticker = useSessionStore((s) => s.ticker);
+  const symbol = useSessionStore((s) => s.symbol);
+  const venue = useSessionStore((s) => s.venue);
+  const timeframe = useSessionStore((s) => s.timeframe);
+  const marketType = useSessionStore((s) => s.marketType);
 
   return (
     <div
@@ -191,7 +198,7 @@ function ChartHeader({
   venue: string;
   timeframe: string;
   marketType: string;
-  ticker: ReturnType<typeof useTerminalStore.getState>["ticker"];
+  ticker: MarketTicker | null;
 }) {
   const formattedVenue = venue
     .split("-")

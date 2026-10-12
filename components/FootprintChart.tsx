@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback } from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore, useSessionStoreApi } from "@/lib/session/SessionContext";
 import type { FootprintCandle, FootprintLevel } from "@/lib/types/market";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 
@@ -54,10 +54,10 @@ export default function FootprintChart({ height }: FootprintChartProps) {
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef({ x: 0, y: 0, scroll: 0, scrollY: 0 });
 
-  const candles = useTerminalStore((s) => s.candles);
-  const currentCandle = useTerminalStore((s) => s.currentCandle);
-  const tickSize = useTerminalStore((s) => s.tickSize);
-  const setCrosshair = useTerminalStore((s) => s.setCrosshair);
+  const candles = useSessionStore((s) => s.candles);
+  const currentCandle = useSessionStore((s) => s.currentCandle);
+  const tickSize = useSessionStore((s) => s.tickSize);
+  const setCrosshair = useSessionStore((s) => s.setCrosshair);
 
   const allCandles = [...candles, ...(currentCandle ? [currentCandle] : [])];
 
@@ -255,12 +255,12 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     }
 
     // Live ticker price line
-    const ticker = useTerminalStore.getState().ticker;
+    const ticker = useSessionStoreApi().getState().ticker;
     if (ticker && sortedPrices.length > 0) {
       // Find exact Y coordinate based on interpolation between known ticks or simple index
       // But ticks are rounded. Let's find the nearest level or approximate
       const maxPrice = sortedPrices[0];
-      const tickSize = useTerminalStore.getState().tickSize;
+      const tickSize = useSessionStoreApi().getState().tickSize;
       
       // Calculate continuous Y position
       const priceDiff = maxPrice - ticker.price;

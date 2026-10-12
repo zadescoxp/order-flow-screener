@@ -1,10 +1,11 @@
 "use client";
 
 import React from "react";
-import { useTerminalStore } from "@/lib/store/terminalStore";
+import { useSessionStore } from "@/lib/session/SessionContext";
 import type { Venue, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
 import type { Theme } from "@/lib/theme";
 import { venueSupports } from "@/lib/adapters/capabilities";
+import { useUIStore } from "@/lib/store/uiStore";
 
 // ─── Theme options ───────────────────────────────────────────
 const THEMES: { value: Theme; label: string }[] = [
@@ -47,9 +48,9 @@ const PROFILES: { value: ToolProfile; label: string }[] = [
 
 // ─── Status bar ───────────────────────────────────────────
 function ConnectionStatus() {
-  const connections = useTerminalStore((s) => s.connections);
-  const ticker = useTerminalStore((s) => s.ticker);
-  const venue = useTerminalStore((s) => s.venue);
+  const connections = useSessionStore((s) => s.connections);
+  const ticker = useSessionStore((s) => s.ticker);
+  const venue = useSessionStore((s) => s.venue);
 
   const conn = connections[venue];
   const status = conn?.status ?? "connecting";
@@ -85,20 +86,20 @@ function ConnectionStatus() {
 
 // ─── Top Bar ─────────────────────────────────────────────
 export default function TopBar() {
-  const symbol = useTerminalStore((s) => s.symbol);
-  const venue = useTerminalStore((s) => s.venue);
-  const marketType = useTerminalStore((s) => s.marketType);
-  const timeframe = useTerminalStore((s) => s.timeframe);
-  const toolProfile = useTerminalStore((s) => s.toolProfile);
-  const ticker = useTerminalStore((s) => s.ticker);
+  const symbol = useSessionStore((s) => s.symbol);
+  const venue = useSessionStore((s) => s.venue);
+  const marketType = useSessionStore((s) => s.marketType);
+  const timeframe = useSessionStore((s) => s.timeframe);
+  const toolProfile = useUIStore((s) => s.toolProfile);
+  const ticker = useSessionStore((s) => s.ticker);
 
-  const setSymbol = useTerminalStore((s) => s.setSymbol);
-  const setVenue = useTerminalStore((s) => s.setVenue);
-  const setMarketType = useTerminalStore((s) => s.setMarketType);
-  const setTimeframe = useTerminalStore((s) => s.setTimeframe);
-  const setToolProfile = useTerminalStore((s) => s.setToolProfile);
-  const theme = useTerminalStore((s) => s.theme);
-  const setTheme = useTerminalStore((s) => s.setTheme);
+  const setSymbol = useSessionStore((s) => s.setSymbol);
+  const setVenue = useSessionStore((s) => s.setVenue);
+  const setMarketType = useSessionStore((s) => s.setMarketType);
+  const setTimeframe = useSessionStore((s) => s.setTimeframe);
+  const setToolProfile = useUIStore((s) => s.setToolProfile);
+  const theme = useUIStore((s) => s.theme);
+  const setTheme = useUIStore((s) => s.setTheme);
 
   const assets = marketType === "perpetual" ? ASSETS_PERP : ASSETS_SPOT;
   const venues = marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
@@ -225,7 +226,7 @@ export default function TopBar() {
       {/* ── Tool Profile Toggles ── */}
       <div className="tab-group" style={{ display: "flex", gap: 2 }}>
         {PROFILES.map((p) => {
-          const currentPanels = useTerminalStore.getState().panels;
+          const currentPanels = useUIStore.getState().panels;
           const isProfileActive = 
               p.value === "order-flow" ? currentPanels.footprint && currentPanels.orderBook && currentPanels.tradesProfile
             : p.value === "liquidity" ? currentPanels.heatmap
@@ -243,7 +244,7 @@ export default function TopBar() {
                   : { volatility: true, footprint: true, volumeProfile: true, heatmap: true };
                 
                 // Toggle logic: if active, turn these specific panels off, else turn them on
-                const setPanelVisible = useTerminalStore.getState().setPanelVisible;
+                const setPanelVisible = useUIStore.getState().setPanelVisible;
                 Object.entries(targetPanels).forEach(([key, val]) => {
                   setPanelVisible(key as any, !isProfileActive ? val : false);
                 });
