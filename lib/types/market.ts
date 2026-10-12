@@ -58,6 +58,11 @@ export interface NormalizedOrderBook {
   sequence?: number;
 }
 
+export interface HeatmapSettings {
+  tradedVolume: boolean;
+  restingLiquidity: boolean;
+}
+
 // ----------------------------------------------------------
 // Footprint Price Level
 // ----------------------------------------------------------

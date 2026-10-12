@@ -1,11 +1,11 @@
 import { create } from "zustand";
 import { applyTheme, type Theme } from "@/lib/theme";
-import type { PanelVisibility, ToolProfile } from "@/lib/types/market";
+import type { HeatmapSettings, PanelVisibility, ToolProfile } from "@/lib/types/market";
 
 const PROFILE_PANELS: Record<ToolProfile, PanelVisibility> = {
   "order-flow": {
     volumeProfile: true, footprint: true, volatility: false, depthOfMarket: true,
-    tradesProfile: true, obi: true, orderBook: true, heatmap: false,
+    tradesProfile: true, obi: true, orderBook: true, heatmap: true,
   },
   liquidity: {
     volumeProfile: false, footprint: true, volatility: false, depthOfMarket: true,
@@ -21,15 +21,18 @@ interface UIStore {
   toolProfile: ToolProfile;
   panels: PanelVisibility;
   theme: Theme;
+  heatmap: HeatmapSettings;
   setToolProfile: (profile: ToolProfile) => void;
   setPanelVisible: (panel: keyof PanelVisibility, visible: boolean) => void;
   setTheme: (theme: Theme) => void;
+  setHeatmapVisible: (mode: keyof HeatmapSettings, visible: boolean) => void;
 }
 
 export const useUIStore = create<UIStore>((set) => ({
   toolProfile: "order-flow",
   panels: PROFILE_PANELS["order-flow"],
   theme: "dark",
+  heatmap: { tradedVolume: true, restingLiquidity: false },
   setToolProfile: (toolProfile) => set({ toolProfile, panels: PROFILE_PANELS[toolProfile] }),
   setPanelVisible: (panel, visible) =>
     set((state) => ({ panels: { ...state.panels, [panel]: visible } })),
@@ -37,4 +40,6 @@ export const useUIStore = create<UIStore>((set) => ({
     applyTheme(theme);
     set({ theme });
   },
+  setHeatmapVisible: (mode, visible) =>
+    set((state) => ({ heatmap: { ...state.heatmap, [mode]: visible } })),
 }));
