@@ -14,6 +14,7 @@ export type Venue =
   | "hyperliquid"
   | "deribit"
   | "coinbase-spot";
+export type VenueSelection = Venue | "all-perps" | "all-spot";
 
 export type MarketType = "spot" | "perpetual";
 export type TradeSide = "buy" | "sell";
@@ -93,6 +94,7 @@ export interface FootprintCandle {
   tradeCount: number;
   maxVolumeAtLevel: number;
   complete: boolean;
+  venueVolumes: Partial<Record<Venue, number>>;
 }
 
 // ----------------------------------------------------------
