@@ -195,7 +195,7 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
       await this.loadContractValue();
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId: this.symbol }, { channel: "books5", instId: this.symbol }] }));
+      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId: this.symbol }, { channel: "books", instId: this.symbol }] }));
       this.startPing(25_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -220,7 +220,7 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
         const price = parseFloat(t.px), qty = parseFloat(t.sz) * this.contractValue;
         this.emitTrade({ id: `okx-${t.tradeId}`, venue: this.venue, symbol: t.instId, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side, marketType: "perpetual" });
       }
-    } else if (msg.arg.channel === "books5") {
+    } else if (msg.arg.channel === "books") {
       for (const d of msg.data as Array<{ bids: [string, string, string, string][]; asks: [string, string, string, string][]; ts: string }>) {
         this.bids.clear(); this.asks.clear();
         for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q) * this.contractValue; if (qty > 0) this.bids.set(price, qty); }
@@ -280,7 +280,7 @@ export class OKXSpotAdapter extends BaseExchangeAdapter {
       this.reconnectAttempts = 0;
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId: this.symbol }, { channel: "books5", instId: this.symbol }] }));
+      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId: this.symbol }, { channel: "books", instId: this.symbol }] }));
       this.startPing(25_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -305,7 +305,7 @@ export class OKXSpotAdapter extends BaseExchangeAdapter {
         const price = parseFloat(t.px), qty = parseFloat(t.sz);
         this.emitTrade({ id: `okxs-${t.tradeId}`, venue: this.venue, symbol: t.instId, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side, marketType: "spot" });
       }
-    } else if (msg.arg.channel === "books5") {
+    } else if (msg.arg.channel === "books") {
       for (const d of msg.data as Array<{ bids: [string, string, string, string][]; asks: [string, string, string, string][]; ts: string }>) {
         this.bids.clear(); this.asks.clear();
         for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }

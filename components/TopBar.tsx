@@ -108,6 +108,8 @@ export default function TopBar() {
   const setToolProfile = useUIStore((s) => s.setToolProfile);
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
+  const heatmapEnabled = useUIStore((s) => s.heatmap.tradedVolume);
+  const setHeatmapVisible = useUIStore((s) => s.setHeatmapVisible);
 
   const assets = marketType === "perpetual" ? ASSETS_PERP : ASSETS_SPOT;
   const venues = marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
@@ -301,6 +303,16 @@ export default function TopBar() {
           );
         })}
       </div>
+
+      <button
+        className={`tab ${heatmapEnabled ? "active" : ""}`}
+        onClick={() => setHeatmapVisible("tradedVolume", !heatmapEnabled)}
+        aria-pressed={heatmapEnabled}
+        style={{ padding: "2px 6px", fontSize: 10, display: "flex", alignItems: "center", gap: 4 }}
+      >
+        <input type="checkbox" checked={heatmapEnabled} readOnly style={{ margin: 0, width: 10, height: 10 }} />
+        Heatmap
+      </button>
 
       <div className="topbar-sep" />
 

@@ -154,7 +154,9 @@ function CenterColumn({ panels }: { panels: PanelVisibility }) {
           overflow: "hidden",
         }}
       >
-        <FootprintChartWrapper />
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <FootprintChartWrapper />
+        </div>
       </div>
 
       {panels.volatility && (
