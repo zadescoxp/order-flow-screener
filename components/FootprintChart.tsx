@@ -183,8 +183,9 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         if (pi === undefined) continue;
         const y = 14 + topOffset + pi * LEVEL_HEIGHT;
         if (y < 14 || y > chartH) continue;
+        const intensity = Math.min(1, volume / heatmapMax);
         ctx.fillStyle = heatmapColor(volume, heatmapMax);
-        ctx.globalAlpha = 0.42;
+        ctx.globalAlpha = 0.06 + intensity * 0.24;
         ctx.fillRect(PRICE_COL_WIDTH, y, W - PRICE_COL_WIDTH, LEVEL_HEIGHT);
       }
       ctx.globalAlpha = 1;
