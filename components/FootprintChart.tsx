@@ -163,29 +163,29 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     const endCandle = Math.min(allCandles.length - 1, startCandle + Math.ceil((W - PRICE_COL_WIDTH) / CANDLE_WIDTH) + 1);
 
     if (tradedVolumeHeatmap) {
-      const volumeValues = allCandles.flatMap((candle) =>
-        [...candle.levels.values()].map((level) => level.totalVolume)
-      ).filter((volume) => volume > 0).sort((a, b) => a - b);
+      const volumeByPrice = new Map<number, number>();
+      for (const candle of allCandles) {
+        for (const [price, level] of candle.levels) {
+          volumeByPrice.set(price, (volumeByPrice.get(price) ?? 0) + level.totalVolume);
+        }
+      }
+      const volumeValues = [...volumeByPrice.values()]
+        .filter((volume) => volume > 0)
+        .sort((a, b) => a - b);
       const heatmapMax = volumeValues.length
         ? volumeValues[Math.min(volumeValues.length - 1, Math.floor(volumeValues.length * 0.95))]
         : 1;
 
       ctx.fillStyle = "#081c34";
       ctx.fillRect(PRICE_COL_WIDTH, 14, W - PRICE_COL_WIDTH, chartH - 14);
-      for (let ci = startCandle; ci <= endCandle; ci++) {
-        const candle = allCandles[ci];
-        if (!candle) continue;
-        const x = PRICE_COL_WIDTH + ci * CANDLE_WIDTH - scroll;
-        if (x + CANDLE_WIDTH < PRICE_COL_WIDTH || x > W) continue;
-        for (let pi = 0; pi < sortedPrices.length; pi++) {
-          const level = candle.levels.get(sortedPrices[pi]);
-          const y = 14 + topOffset + pi * LEVEL_HEIGHT;
-          if (y < 14 || y > chartH) continue;
-          const volume = level?.totalVolume ?? 0;
-          ctx.fillStyle = heatmapColor(volume, heatmapMax);
-          ctx.globalAlpha = volume > 0 ? 0.92 : 0.18;
-          ctx.fillRect(x, y, CANDLE_WIDTH - 1, LEVEL_HEIGHT);
-        }
+      for (const [price, volume] of volumeByPrice) {
+        const pi = priceIndex.get(price);
+        if (pi === undefined) continue;
+        const y = 14 + topOffset + pi * LEVEL_HEIGHT;
+        if (y < 14 || y > chartH) continue;
+        ctx.fillStyle = heatmapColor(volume, heatmapMax);
+        ctx.globalAlpha = 0.9;
+        ctx.fillRect(PRICE_COL_WIDTH, y, W - PRICE_COL_WIDTH, LEVEL_HEIGHT);
       }
       ctx.globalAlpha = 1;
     }
@@ -220,7 +220,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         const intensity = candle.maxVolumeAtLevel > 0 ? (level.totalVolume / candle.maxVolumeAtLevel) : 0;
         
         // Colors for cell: green if ask > bid, red if bid > ask
-        const alpha = tradedVolumeHeatmap ? 0.08 + (intensity * 0.12) : 0.1 + (intensity * 0.5);
+        const alpha = tradedVolumeHeatmap ? 0.06 + (intensity * 0.08) : 0.1 + (intensity * 0.5);
         ctx.fillStyle = addAlpha(isAskDom ? buyColor : sellColor, alpha);
         ctx.fillRect(x + 1, y, CANDLE_WIDTH - 2, LEVEL_HEIGHT - 1);
 
