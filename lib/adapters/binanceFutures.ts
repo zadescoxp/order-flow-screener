@@ -21,41 +21,20 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
   constructor(symbol: string) { super(symbol.toUpperCase()); }
   protected buildWsUrl(): string { return this.BASE_WS; }
 
-  connect(): void {
-    this.setStatus("connecting");
-    this.ws = new WebSocket(this.buildWsUrl()) as unknown as WebSocket;
-    this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
-      this.lastHeartbeat = Date.now();
-      this.setStatus("live");
-      this.startPingInterval();
-      const s = this.symbol.toLowerCase();
-      this.ws!.send(JSON.stringify({ method: "SUBSCRIBE", params: [`${s}@depth50`, `${s}@trade`], id: 1 }));
-    };
-
-    this.ws.onmessage = (event: MessageEvent) => {
-      this.lastHeartbeat = Date.now();
-      try { this.handleMessage(JSON.parse(event.data as string)); } catch { /**/ }
-    };
-
-    this.ws.onerror = () => this.setStatus("error");
-    this.ws.onclose = () => {
-      this.stopPingInterval();
-      if (this.status !== "offline") { this.setStatus("connecting"); this.reconnect(); }
-    };
-  }
-
-  disconnect(): void {
-    this.setStatus("offline");
-    this.stopPingInterval();
-    if (this.ws) { this.ws.close(); this.ws = null; }
+  protected subscribe(): void {
+    const s = this.symbol.toLowerCase();
+    this.ws?.send(JSON.stringify({
+      method: "SUBSCRIBE",
+      params: [`${s}@depth20@100ms`, `${s}@aggTrade`],
+      id: 1,
+    }));
   }
 
   protected handleMessage(raw: unknown): void {
     const msg = raw as any;
-    if (msg.e === "trade") {
+    if (msg.e === "aggTrade") {
       const price = parseFloat(msg.p), qty = parseFloat(msg.q);
-      this.emitTrade({ id: `bf-${msg.t}`, venue: this.venue, symbol: msg.s, timestamp: msg.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: msg.m ? "sell" : "buy", marketType: "perpetual", sequence: msg.t });
+      this.emitTrade({ id: `bf-${msg.a}`, venue: this.venue, symbol: msg.s, timestamp: msg.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: msg.m ? "sell" : "buy", marketType: "perpetual", sequence: msg.a });
     } else if (msg.lastUpdateId && msg.bids && msg.asks) {
       this.bids.clear(); this.asks.clear();
       for (const [p, q] of msg.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
@@ -77,7 +56,9 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
     this.emitOrderBook(book);
   }
 
-  protected sendPing(): void { if (Date.now() - this.lastHeartbeat > this.staleThresholdMs) this.setStatus("stale"); }
-  private startPingInterval(): void { this.pingInterval = setInterval(() => this.sendPing(), 10_000); }
-  private stopPingInterval(): void { if (this.pingInterval) clearInterval(this.pingInterval); this.pingInterval = null; }
+  protected sendPing(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ method: "LIST_SUBSCRIPTIONS", id: 2 }));
+    }
+  }
 }
