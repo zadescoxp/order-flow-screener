@@ -118,6 +118,11 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
     this.setStatus("error");
   }
 
+  protected requestResubscribe(): void {
+    this.setStatus("stale");
+    this.ws?.close();
+  }
+
   protected startPingInterval(intervalMs = 10_000): void {
     this.stopPingInterval();
     this.pingInterval = setInterval(() => {

@@ -77,10 +77,16 @@ export class BybitFuturesAdapter extends BaseExchangeAdapter {
       }
     } else if (msg.topic.startsWith("orderbook.")) {
       const data = msg.data as BybitDepthData;
-      if (msg.type === "snapshot") { this.bids.clear(); this.asks.clear(); }
+      if (msg.type === "snapshot") { this.bids.clear(); this.asks.clear(); this.lastSeq = 0; }
+      if (msg.type === "delta" && this.lastSeq > 0 && data.u > this.lastSeq + 1) {
+        this.bids.clear();
+        this.asks.clear();
+        this.requestResubscribe();
+        return;
+      }
       for (const [p, q] of data.b) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
       for (const [p, q] of data.a) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
-      this.lastSeq = data.seq;
+      this.lastSeq = data.u;
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
     }
   }
@@ -102,6 +108,7 @@ export class BybitSpotAdapter extends BaseExchangeAdapter {
   private readonly BASE_WS = "wss://stream.bybit.com/v5/public/spot";
   private bids = new Map<number, number>();
   private asks = new Map<number, number>();
+  private lastSeq = 0;
 
   constructor(symbol: string) { super(symbol.toUpperCase()); }
   protected buildWsUrl(): string { return this.BASE_WS; }
@@ -135,9 +142,16 @@ export class BybitSpotAdapter extends BaseExchangeAdapter {
       }
     } else if (msg.topic.startsWith("orderbook.")) {
       const data = msg.data as BybitDepthData;
-      if (msg.type === "snapshot") { this.bids.clear(); this.asks.clear(); }
+      if (msg.type === "snapshot") { this.bids.clear(); this.asks.clear(); this.lastSeq = 0; }
+      if (msg.type === "delta" && this.lastSeq > 0 && data.u > this.lastSeq + 1) {
+        this.bids.clear();
+        this.asks.clear();
+        this.requestResubscribe();
+        return;
+      }
       for (const [p, q] of data.b) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
       for (const [p, q] of data.a) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
+      this.lastSeq = data.u;
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
     }
   }
