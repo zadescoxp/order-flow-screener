@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useCallback } from "react";
 import { useSessionStore, useSessionStoreApi } from "@/lib/session/SessionContext";
 import { scheduleCanvasRedraw } from "@/lib/session/canvasScheduler";
-import type { FootprintCandle, FootprintLevel, NormalizedOrderBook, AggregatedOrderBook, Venue, VenueSelection } from "@/lib/types/market";
+import type { FootprintCandle, FootprintLevel } from "@/lib/types/market";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 import { useUIStore } from "@/lib/store/uiStore";
 
@@ -81,22 +81,6 @@ export default function FootprintChart({ height }: FootprintChartProps) {
   const setCrosshair = useSessionStore((s) => s.setCrosshair);
   const sessionStore = useSessionStoreApi();
   const tradedVolumeHeatmap = useUIStore((s) => s.heatmap.tradedVolume);
-  const restingLiquidityHeatmap = useUIStore((s) => s.heatmap.restingLiquidity);
-  const venue = useSessionStore((s) => s.venue);
-  const orderBooks = useSessionStore((s) => s.orderBooks);
-  const aggregatedBook = useSessionStore((s) => s.aggregatedBook);
-  const bookRef = useRef<{ venue: VenueSelection; orderBooks: Partial<Record<Venue, NormalizedOrderBook>>; aggregatedBook: AggregatedOrderBook | null }>({
-    venue,
-    orderBooks,
-    aggregatedBook,
-  });
-  const liquiditySamplesRef = useRef<Map<number, number>[]>([]);
-  const drawRef = useRef<() => void>(() => undefined);
-
-  useEffect(() => {
-    bookRef.current = { venue, orderBooks, aggregatedBook };
-  }, [venue, orderBooks, aggregatedBook]);
-
   const allCandles = [...candles, ...(currentCandle ? [currentCandle] : [])];
 
   const draw = useCallback(() => {
@@ -142,15 +126,6 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     const allPrices = new Set<number>();
     for (const c of allCandles) {
       for (const p of c.sortedPrices) allPrices.add(p);
-    }
-    if (restingLiquidityHeatmap) {
-      const current = bookRef.current;
-      const book = current.venue === "all-perps" || current.venue === "all-spot"
-        ? current.aggregatedBook
-        : current.orderBooks[current.venue as Venue];
-      if (book) {
-        for (const level of [...book.bids, ...book.asks]) allPrices.add(level.price);
-      }
     }
     const sortedPrices = [...allPrices].sort((a, b) => b - a);
     if (sortedPrices.length === 0) return;
@@ -210,35 +185,6 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         const intensity = Math.min(1, volume / heatmapMax);
         ctx.fillStyle = heatmapColor(volume, heatmapMax);
         ctx.globalAlpha = 0.06 + intensity * 1;
-        ctx.fillRect(PRICE_COL_WIDTH, y, W - PRICE_COL_WIDTH, LEVEL_HEIGHT);
-      }
-      ctx.globalAlpha = 1;
-    }
-
-    if (restingLiquidityHeatmap && liquiditySamplesRef.current.length > 0) {
-      const liquidityByPrice = new Map<number, number>();
-      for (const sample of liquiditySamplesRef.current) {
-        for (const [price, size] of sample) {
-          liquidityByPrice.set(price, (liquidityByPrice.get(price) ?? 0) + size);
-        }
-      }
-      const sampleCount = liquiditySamplesRef.current.length;
-      for (const [price, size] of liquidityByPrice) {
-        liquidityByPrice.set(price, size / sampleCount);
-      }
-      const liquidityValues = [...liquidityByPrice.values()].filter((size) => size > 0).sort((a, b) => a - b);
-      const liquidityMax = liquidityValues.length
-        ? liquidityValues[Math.min(liquidityValues.length - 1, Math.floor(liquidityValues.length * 0.95))]
-        : 1;
-
-      for (const [price, size] of liquidityByPrice) {
-        const pi = priceIndex.get(price);
-        if (pi === undefined) continue;
-        const y = 14 + topOffset + pi * LEVEL_HEIGHT;
-        if (y < 14 || y > chartH) continue;
-        const intensity = Math.min(1, size / liquidityMax);
-        ctx.fillStyle = heatmapColor(size, liquidityMax);
-        ctx.globalAlpha = 0.04 + intensity * 0.16;
         ctx.fillRect(PRICE_COL_WIDTH, y, W - PRICE_COL_WIDTH, LEVEL_HEIGHT);
       }
       ctx.globalAlpha = 1;
@@ -410,37 +356,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     ctx.lineTo(W, tableY);
     ctx.stroke();
 
-  }, [allCandles, sessionStore, tickSize, tradedVolumeHeatmap, restingLiquidityHeatmap]);
-
-  useEffect(() => {
-    drawRef.current = draw;
-  }, [draw]);
-
-  useEffect(() => {
-    if (!restingLiquidityHeatmap) {
-      liquiditySamplesRef.current = [];
-      return;
-    }
-
-    const sampleBook = () => {
-      const current = bookRef.current;
-      const book = current.venue === "all-perps" || current.venue === "all-spot"
-        ? current.aggregatedBook
-        : current.orderBooks[current.venue as Venue];
-      if (!book) return;
-
-      const sample = new Map<number, number>();
-      for (const level of [...book.bids, ...book.asks]) {
-        sample.set(level.price, (sample.get(level.price) ?? 0) + level.size);
-      }
-      liquiditySamplesRef.current = [...liquiditySamplesRef.current, sample].slice(-600);
-      scheduleCanvasRedraw(drawRef.current);
-    };
-
-    sampleBook();
-    const timer = window.setInterval(sampleBook, 1_000);
-    return () => window.clearInterval(timer);
-  }, [restingLiquidityHeatmap, venue]);
+  }, [allCandles, sessionStore, tickSize, tradedVolumeHeatmap]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

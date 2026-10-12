@@ -32,7 +32,7 @@ export const useUIStore = create<UIStore>((set) => ({
   toolProfile: "order-flow",
   panels: PROFILE_PANELS["order-flow"],
   theme: "dark",
-  heatmap: { tradedVolume: true, restingLiquidity: false },
+  heatmap: { tradedVolume: true },
   setToolProfile: (toolProfile) => set({ toolProfile, panels: PROFILE_PANELS[toolProfile] }),
   setPanelVisible: (panel, visible) =>
     set((state) => ({ panels: { ...state.panels, [panel]: visible } })),

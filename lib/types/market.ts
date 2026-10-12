@@ -60,7 +60,6 @@ export interface NormalizedOrderBook {
 
 export interface HeatmapSettings {
   tradedVolume: boolean;
-  restingLiquidity: boolean;
 }
 
 // ----------------------------------------------------------

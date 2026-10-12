@@ -61,9 +61,7 @@ Users **observe**, **analyze**, **compare** and **screen** live market data.
 - Traded-volume heatmap is enabled by default and keeps a 10-minute typed-array window.
 - Volume intensity is clipped near the 95th percentile and uses the active terminal theme.
 - Aggregated venue selections combine traded volume and show the same time window.
-- Optional resting-liquidity heatmap samples the order book once per second after it is enabled.
-- Resting liquidity is capped to a 10-minute window and reports each venue's covered price range.
-- Open the **Heatmap** menu in the top bar to toggle traded volume and resting liquidity independently.
+- Use the **Heatmap** button beside the Volatility control to toggle the traded-volume overlay.
 
 ### Order Book
 - Live bid/ask levels with cumulative depth bars
@@ -93,7 +91,7 @@ Users **observe**, **analyze**, **compare** and **screen** live market data.
 ## How to Use It
 
 1. **Select an Asset and Venue:** Use the Top Bar to select whether you want to analyze Spot or Perpetual markets, select your target asset (e.g. BTCUSDT), and choose the specific exchange.
-2. **Customize Your Workspace:** Click on the tabs in the Top Bar to toggle modules on/off (Heatmap, Order Book, Volume Profile, OBI, Volatility, DOM). Use the Heatmap menu to enable resting liquidity sampling.
+2. **Customize Your Workspace:** Click on the tabs in the Top Bar to toggle modules on/off (Heatmap, Order Book, Volume Profile, OBI, Volatility, DOM).
 3. **Analyze Data:** Hover over any data point on the terminal—whether on the footprint chart, the DOM, or the profiles—to read a detailed tooltip explaining exactly what the data means.
 4. **Resize Panels:** Adjust the screen layout by dragging the borders between panels to fit your specific trading/screening setup.
 

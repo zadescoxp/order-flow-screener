@@ -68,7 +68,6 @@ export class MarketDataManager {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingTrades: NormalizedTrade[] = [];
   private pendingOrderBook: NormalizedOrderBook | null = null;
-  private pendingOrderBooks = new Map<Venue, NormalizedOrderBook>();
   private pendingAggregatedBook: ReturnType<typeof aggregateBooks> = null;
   private pendingConnections = new Map<Venue, Parameters<TerminalStore["updateConnection"]>[0]>();
   private pendingCandle: FootprintCandle | null = null;
@@ -145,7 +144,6 @@ export class MarketDataManager {
     this.flushTimer = null;
     this.pendingTrades = [];
     this.pendingOrderBook = null;
-    this.pendingOrderBooks.clear();
     this.pendingAggregatedBook = null;
     this.pendingCandle = null;
     this.pendingVolumeProfile = null;
@@ -278,7 +276,6 @@ export class MarketDataManager {
     this.pendingOrderBook = {
       ...book,
     };
-    this.pendingOrderBooks.set(book.venue, book);
     this.pendingAggregatedBook = aggregate;
     this.pendingOBI = snap;
     this.scheduleFlush();
@@ -301,7 +298,6 @@ export class MarketDataManager {
       const batch: MarketDataBatch = {
         trades: this.pendingTrades,
         orderBook: this.pendingOrderBook,
-        orderBooks: [...this.pendingOrderBooks.values()],
         aggregatedBook: this.pendingAggregatedBook,
         candle: this.pendingCandle,
         volumeProfile: this.pendingVolumeProfile,
@@ -313,7 +309,6 @@ export class MarketDataManager {
       store.applyMarketDataBatch(batch);
       this.pendingTrades = [];
       this.pendingOrderBook = null;
-      this.pendingOrderBooks.clear();
       this.pendingAggregatedBook = null;
       this.pendingCandle = null;
       this.pendingVolumeProfile = null;

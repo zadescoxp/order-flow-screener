@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { useSessionStore } from "@/lib/session/SessionContext";
 import type { Venue, VenueSelection, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
 import type { Theme } from "@/lib/theme";
@@ -108,9 +108,8 @@ export default function TopBar() {
   const setToolProfile = useUIStore((s) => s.setToolProfile);
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
-  const heatmap = useUIStore((s) => s.heatmap);
+  const heatmapEnabled = useUIStore((s) => s.heatmap.tradedVolume);
   const setHeatmapVisible = useUIStore((s) => s.setHeatmapVisible);
-  const [heatmapMenuOpen, setHeatmapMenuOpen] = useState(false);
 
   const assets = marketType === "perpetual" ? ASSETS_PERP : ASSETS_SPOT;
   const venues = marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
@@ -305,51 +304,15 @@ export default function TopBar() {
         })}
       </div>
 
-      <div className="topbar-sep" />
-
-      <div style={{ position: "relative" }}>
-        <button
-          className={`btn ${heatmap.tradedVolume || heatmap.restingLiquidity ? "active" : ""}`}
-          onClick={() => setHeatmapMenuOpen((open) => !open)}
-          aria-expanded={heatmapMenuOpen}
-          aria-haspopup="menu"
-        >
-          ▦ Heatmap <span style={{ fontSize: 8 }}>▾</span>
-        </button>
-        {heatmapMenuOpen && (
-          <div
-            role="menu"
-            style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              left: 0,
-              zIndex: 10,
-              minWidth: 170,
-              padding: 6,
-              background: "var(--bg-panel)",
-              border: "1px solid var(--border)",
-              boxShadow: "0 6px 18px rgba(0,0,0,0.35)",
-            }}
-          >
-            {([
-              ["tradedVolume", "Traded volume"],
-              ["restingLiquidity", "Resting liquidity"],
-            ] as const).map(([mode, label]) => (
-              <label
-                key={mode}
-                style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 4px", color: "var(--text-secondary)", cursor: "pointer" }}
-              >
-                <input
-                  type="checkbox"
-                  checked={heatmap[mode]}
-                  onChange={(event) => setHeatmapVisible(mode, event.target.checked)}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
+      <button
+        className={`tab ${heatmapEnabled ? "active" : ""}`}
+        onClick={() => setHeatmapVisible("tradedVolume", !heatmapEnabled)}
+        aria-pressed={heatmapEnabled}
+        style={{ padding: "2px 6px", fontSize: 10, display: "flex", alignItems: "center", gap: 4 }}
+      >
+        <input type="checkbox" checked={heatmapEnabled} readOnly style={{ margin: 0, width: 10, height: 10 }} />
+        Heatmap
+      </button>
 
       <div className="topbar-sep" />
 

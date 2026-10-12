@@ -52,7 +52,6 @@ export interface MarketDataState {
   volumeProfile: VolumeProfile | null;
   recentTrades: NormalizedTrade[];
   orderBook: NormalizedOrderBook | null;
-  orderBooks: Partial<Record<Venue, NormalizedOrderBook>>;
   aggregatedBook: AggregatedOrderBook | null;
   obiHistory: OBISnapshot[];
   currentOBI: number;
@@ -109,7 +108,6 @@ export interface MarketDataBatch {
   obi: OBISnapshot | null;
   zScores: ZScorePoint[];
   connections: VenueConnection[];
-  orderBooks: NormalizedOrderBook[];
 }
 
 // ----------------------------------------------------------
@@ -170,7 +168,6 @@ const INITIAL_MARKET: MarketDataState = {
   volumeProfile: null,
   recentTrades: [],
   orderBook: null,
-  orderBooks: {},
   aggregatedBook: null,
   obiHistory: [],
   currentOBI: 0,
@@ -256,7 +253,7 @@ export const createTerminalStore = () => {
       }),
 
     updateOrderBook: (book) =>
-      set((s) => ({ orderBook: book, orderBooks: { ...s.orderBooks, [book.venue]: book } })),
+      set({ orderBook: book }),
 
     updateAggregatedBook: (aggregatedBook) =>
       set({ aggregatedBook }),
@@ -298,9 +295,6 @@ export const createTerminalStore = () => {
             ? recentTradeBuffer.newestFirst()
             : s.recentTrades,
           orderBook: batch.orderBook ?? s.orderBook,
-          orderBooks: batch.orderBooks.length
-            ? { ...s.orderBooks, ...Object.fromEntries(batch.orderBooks.map((book) => [book.venue, book])) }
-            : s.orderBooks,
           aggregatedBook: batch.aggregatedBook ?? s.aggregatedBook,
           currentCandle: batch.candle ?? s.currentCandle,
           volumeProfile: batch.volumeProfile ?? s.volumeProfile,
