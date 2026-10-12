@@ -14,6 +14,7 @@ export function useMarketData() {
   const timeframe = useSessionStore((s) => s.timeframe);
   const tickSize = useSessionStore((s) => s.tickSize);
   const imbalanceThreshold = useSessionStore((s) => s.imbalanceThreshold);
+  const selectedVenues = useSessionStore((s) => s.selectedVenues);
   const session = useMarketSession();
 
   useEffect(() => {
@@ -23,11 +24,12 @@ export function useMarketData() {
       marketType,
       timeframe,
       tickSize,
-      imbalanceThreshold
+      imbalanceThreshold,
+      selectedVenues
     );
 
     return () => {
       // Don't disconnect on every re-render; manager handles de-duplication
     };
-  }, [session, symbol, venue, marketType, timeframe, tickSize, imbalanceThreshold]);
+  }, [session, symbol, venue, marketType, timeframe, tickSize, imbalanceThreshold, selectedVenues]);
 }

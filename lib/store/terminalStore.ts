@@ -7,6 +7,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 import { type Theme, applyTheme } from "@/lib/theme";
 import type {
   Venue,
+  VenueSelection,
   MarketType,
   Timeframe,
   ToolProfile,
@@ -29,7 +30,8 @@ import { RingBuffer } from "@/lib/session/RingBuffer";
 // ----------------------------------------------------------
 export interface TerminalSettings {
   symbol: string;
-  venue: Venue;
+  venue: VenueSelection;
+  selectedVenues: Venue[];
   marketType: MarketType;
   timeframe: Timeframe;
   toolProfile: ToolProfile;
@@ -68,7 +70,8 @@ export interface MarketDataState {
 export interface TerminalActions {
   // Settings
   setSymbol: (s: string) => void;
-  setVenue: (v: Venue) => void;
+  setVenue: (v: VenueSelection) => void;
+  setSelectedVenues: (venues: Venue[]) => void;
   setMarketType: (m: MarketType) => void;
   setTimeframe: (t: Timeframe) => void;
   setToolProfile: (tp: ToolProfile) => void;
@@ -81,6 +84,7 @@ export interface TerminalActions {
   // Market data mutations
   pushTrade: (trade: NormalizedTrade) => void;
   updateOrderBook: (book: NormalizedOrderBook) => void;
+  updateAggregatedBook: (book: AggregatedOrderBook | null) => void;
   updateCurrentCandle: (candle: FootprintCandle) => void;
   finalizeCandle: (candle: FootprintCandle) => void;
   setVolumeProfile: (vp: VolumeProfile) => void;
@@ -133,6 +137,7 @@ const PROFILE_PANELS: Record<ToolProfile, PanelVisibility> = {
 const INITIAL_SETTINGS: TerminalSettings = {
   symbol: "BTCUSDT",
   venue: "bybit-futures",
+  selectedVenues: ["bybit-futures"],
   marketType: "perpetual",
   timeframe: "5m",
   toolProfile: "order-flow",
@@ -177,7 +182,17 @@ export const createTerminalStore = () => {
       set((s) => ({ symbol, ...INITIAL_MARKET })),
 
     setVenue: (venue) =>
-      set({ venue, ...INITIAL_MARKET }),
+      set((s) => ({
+        venue,
+        selectedVenues:
+          venue === "all-perps" || venue === "all-spot"
+            ? s.selectedVenues
+            : [venue],
+        ...INITIAL_MARKET,
+      })),
+
+    setSelectedVenues: (selectedVenues) =>
+      set({ selectedVenues, ...INITIAL_MARKET }),
 
     setMarketType: (marketType) =>
       set((s) => {
@@ -187,7 +202,12 @@ export const createTerminalStore = () => {
         const newVenue = isValidVenue 
           ? s.venue 
           : (marketType === "perpetual" ? "bybit-futures" : "bybit-spot");
-        return { marketType, venue: newVenue as Venue, ...INITIAL_MARKET };
+        return {
+          marketType,
+          venue: newVenue as Venue,
+          selectedVenues: [newVenue as Venue],
+          ...INITIAL_MARKET,
+        };
       }),
 
     setTimeframe: (timeframe) =>
@@ -222,6 +242,9 @@ export const createTerminalStore = () => {
 
     updateOrderBook: (book) =>
       set({ orderBook: book }),
+
+    updateAggregatedBook: (aggregatedBook) =>
+      set({ aggregatedBook }),
 
     updateCurrentCandle: (candle) =>
       set({ currentCandle: candle }),

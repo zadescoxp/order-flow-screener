@@ -6,8 +6,9 @@
 
 "use client";
 
-import { venueSupports } from "@/lib/adapters/capabilities";
+import { venueSupports, venuesForSelection } from "@/lib/adapters/capabilities";
 import { acquireAdapter, releaseAdapter } from "@/lib/session/adapterPool";
+import { aggregateBooks, computeBandObi } from "@/lib/aggregation/marketAggregation";
 import type { BaseExchangeAdapter } from "@/lib/adapters/base";
 import {
   getCandleOpenTime,
@@ -22,6 +23,7 @@ import type { TerminalStore } from "@/lib/store/terminalStore";
 import type { StoreApi } from "zustand";
 import type {
   Venue,
+  VenueSelection,
   Timeframe,
   MarketType,
   NormalizedTrade,
@@ -34,9 +36,16 @@ import type {
 
 export class MarketDataManager {
   private readonly store: StoreApi<TerminalStore>;
-  private adapter: BaseExchangeAdapter | null = null;
+  private adapters = new Map<Venue, BaseExchangeAdapter>();
+  private books = new Map<Venue, NormalizedOrderBook>();
+  private listeners = new Map<Venue, {
+    tradeListener: (trade: NormalizedTrade) => void;
+    bookListener: (book: NormalizedOrderBook) => void;
+    statusListener: (conn: Parameters<TerminalStore["updateConnection"]>[0]) => void;
+  }>();
   private currentSymbol = "";
-  private currentVenue: Venue | null = null;
+  private currentVenue: VenueSelection | null = null;
+  private currentSelectedVenues: Venue[] = [];
   private currentMarketType: MarketType = "perpetual";
   private currentTimeframe: Timeframe = "5m";
   private currentTickSize = 10;
@@ -59,30 +68,32 @@ export class MarketDataManager {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingTrades: NormalizedTrade[] = [];
   private pendingOrderBook: NormalizedOrderBook | null = null;
-  private pendingConnection: Parameters<TerminalStore["updateConnection"]>[0] | null = null;
+  private pendingAggregatedBook: ReturnType<typeof aggregateBooks> = null;
+  private pendingConnections = new Map<Venue, Parameters<TerminalStore["updateConnection"]>[0]>();
   private pendingCandle: FootprintCandle | null = null;
   private pendingTicker: Parameters<TerminalStore["updateTicker"]>[0] | null = null;
   private pendingOBI: OBISnapshot | null = null;
   private pendingZScores: ZScorePoint[] = [];
-  private tradeListener: ((trade: NormalizedTrade) => void) | null = null;
-  private bookListener: ((book: NormalizedOrderBook) => void) | null = null;
-  private statusListener: ((conn: Parameters<TerminalStore["updateConnection"]>[0]) => void) | null = null;
 
   constructor(store: StoreApi<TerminalStore>) {
     this.store = store;
   }
 
   subscribe(
-    venue: Venue,
+    venue: VenueSelection,
     symbol: string,
     marketType: MarketType,
     timeframe: Timeframe,
     tickSize: number,
-    imbalanceThreshold: number
+    imbalanceThreshold: number,
+    selectedVenues?: Venue[]
   ): void {
-    if (!venueSupports(venue, symbol, marketType)) {
+    const venues = selectedVenues?.length
+      ? selectedVenues
+      : venuesForSelection(venue, marketType, symbol);
+    if (!venues.length || venues.some((selected) => !venueSupports(selected, symbol, marketType))) {
       this.store.getState().updateConnection({
-        venue,
+        venue: venues[0] ?? "bybit-futures",
         status: "error",
         lastHeartbeat: 0,
         reconnectAttempts: 0,
@@ -91,8 +102,9 @@ export class MarketDataManager {
       return;
     }
     if (
-      this.adapter !== null &&
+      this.adapters.size > 0 &&
       this.currentVenue === venue &&
+      JSON.stringify(this.currentSelectedVenues) === JSON.stringify(venues) &&
       this.currentSymbol === symbol &&
       this.currentTimeframe === timeframe
     ) {
@@ -102,31 +114,28 @@ export class MarketDataManager {
     this.disconnect();
 
     this.currentVenue = venue;
+    this.currentSelectedVenues = [...venues];
     this.currentSymbol = symbol;
     this.currentMarketType = marketType;
     this.currentTimeframe = timeframe;
     this.currentTickSize = tickSize;
     this.currentImbalanceThreshold = imbalanceThreshold;
 
-    this.adapter = acquireAdapter(venue, symbol, marketType);
-    if (!this.adapter) return;
-
-    this.tradeListener = (trade: NormalizedTrade) => {
-      this.onTrade(trade);
-    };
-    this.adapter.on("trade", this.tradeListener);
-
-    this.bookListener = (book: NormalizedOrderBook) => {
-      this.onOrderBook(book);
-    };
-    this.adapter.on("orderbook", this.bookListener);
-
-    this.statusListener = (conn) => {
-      this.pendingConnection = conn;
-      this.scheduleFlush();
-    };
-    this.adapter.on("status", this.statusListener);
-
+    for (const selectedVenue of venues) {
+      const adapter = acquireAdapter(selectedVenue, symbol, marketType);
+      if (!adapter) continue;
+      const tradeListener = (trade: NormalizedTrade) => this.onTrade(trade);
+      const bookListener = (book: NormalizedOrderBook) => this.onOrderBook(book);
+      const statusListener = (conn: Parameters<TerminalStore["updateConnection"]>[0]) => {
+        this.pendingConnections.set(conn.venue, conn);
+        this.scheduleFlush();
+      };
+      adapter.on("trade", tradeListener);
+      adapter.on("orderbook", bookListener);
+      adapter.on("status", statusListener);
+      this.adapters.set(selectedVenue, adapter);
+      this.listeners.set(selectedVenue, { tradeListener, bookListener, statusListener });
+    }
   }
 
   disconnect(): void {
@@ -134,20 +143,24 @@ export class MarketDataManager {
     this.flushTimer = null;
     this.pendingTrades = [];
     this.pendingOrderBook = null;
+    this.pendingAggregatedBook = null;
     this.pendingCandle = null;
     this.pendingTicker = null;
     this.pendingOBI = null;
     this.pendingZScores = [];
-    this.pendingConnection = null;
-    if (this.adapter) {
-      if (this.tradeListener) this.adapter.removeListener("trade", this.tradeListener);
-      if (this.bookListener) this.adapter.removeListener("orderbook", this.bookListener);
-      if (this.statusListener) this.adapter.removeListener("status", this.statusListener);
-      if (this.currentVenue) {
-        releaseAdapter(this.currentVenue, this.currentSymbol, this.currentMarketType);
+    this.pendingConnections.clear();
+    for (const [venue, adapter] of this.adapters) {
+      const listeners = this.listeners.get(venue);
+      if (listeners) {
+        adapter.removeListener("trade", listeners.tradeListener);
+        adapter.removeListener("orderbook", listeners.bookListener);
+        adapter.removeListener("status", listeners.statusListener);
       }
-      this.adapter = null;
+      releaseAdapter(venue, this.currentSymbol, this.currentMarketType);
     }
+    this.adapters.clear();
+    this.listeners.clear();
+    this.books.clear();
     this.currentCandleRef = null;
     this.allLevels = [];
     this.volumeWindow = [];
@@ -243,10 +256,10 @@ export class MarketDataManager {
   private onOrderBook(book: NormalizedOrderBook): void {
     if (this.paused) return;
 
-    // Compute OBI from top N levels
-    const topN = 10;
-    const bidVol = book.bids.slice(0, topN).reduce((s, l) => s + l.size, 0);
-    const askVol = book.asks.slice(0, topN).reduce((s, l) => s + l.size, 0);
+    this.books.set(book.venue, book);
+    const aggregate = aggregateBooks(this.books);
+    if (!aggregate) return;
+    const { bidVolume: bidVol, askVolume: askVol } = computeBandObi(this.books, aggregate);
     const obi = computeOBI(bidVol, askVol);
 
     const snap: OBISnapshot = {
@@ -255,7 +268,15 @@ export class MarketDataManager {
       bidVolume: bidVol,
       askVolume: askVol,
     };
-    this.pendingOrderBook = book;
+    this.pendingOrderBook = {
+      venue: book.venue,
+      symbol: book.symbol,
+      timestamp: aggregate.timestamp,
+      localTimestamp: Date.now(),
+      bids: aggregate.bids,
+      asks: aggregate.asks,
+    };
+    this.pendingAggregatedBook = aggregate;
     this.pendingOBI = snap;
     this.scheduleFlush();
   }
@@ -282,6 +303,10 @@ export class MarketDataManager {
         store.updateOrderBook(this.pendingOrderBook);
         this.pendingOrderBook = null;
       }
+      if (this.pendingAggregatedBook) {
+        store.updateAggregatedBook(this.pendingAggregatedBook);
+        this.pendingAggregatedBook = null;
+      }
       if (this.pendingCandle) {
         store.updateCurrentCandle(this.pendingCandle);
         this.pendingCandle = null;
@@ -296,10 +321,10 @@ export class MarketDataManager {
       }
       for (const point of this.pendingZScores) store.pushZScore(point);
       this.pendingZScores = [];
-      if (this.pendingConnection) {
-        store.updateConnection(this.pendingConnection);
-        this.pendingConnection = null;
+      for (const connection of this.pendingConnections.values()) {
+        store.updateConnection(connection);
       }
+      this.pendingConnections.clear();
     }, 50);
   }
 }
