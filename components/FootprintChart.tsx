@@ -59,6 +59,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
   const currentCandle = useSessionStore((s) => s.currentCandle);
   const tickSize = useSessionStore((s) => s.tickSize);
   const setCrosshair = useSessionStore((s) => s.setCrosshair);
+  const sessionStore = useSessionStoreApi();
 
   const allCandles = [...candles, ...(currentCandle ? [currentCandle] : [])];
 
@@ -256,12 +257,12 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     }
 
     // Live ticker price line
-    const ticker = useSessionStoreApi().getState().ticker;
+    const ticker = sessionStore.getState().ticker;
     if (ticker && sortedPrices.length > 0) {
       // Find exact Y coordinate based on interpolation between known ticks or simple index
       // But ticks are rounded. Let's find the nearest level or approximate
       const maxPrice = sortedPrices[0];
-      const tickSize = useSessionStoreApi().getState().tickSize;
+      const tickSize = sessionStore.getState().tickSize;
       
       // Calculate continuous Y position
       const priceDiff = maxPrice - ticker.price;
@@ -306,7 +307,7 @@ export default function FootprintChart({ height }: FootprintChartProps) {
     ctx.lineTo(W, tableY);
     ctx.stroke();
 
-  }, [allCandles, tickSize]);
+  }, [allCandles, sessionStore, tickSize]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
