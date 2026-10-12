@@ -4,6 +4,7 @@ import React from "react";
 import { useTerminalStore } from "@/lib/store/terminalStore";
 import type { Venue, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
 import type { Theme } from "@/lib/theme";
+import { venueSupports } from "@/lib/adapters/capabilities";
 
 // ─── Theme options ───────────────────────────────────────────
 const THEMES: { value: Theme; label: string }[] = [
@@ -207,7 +208,11 @@ export default function TopBar() {
           id="venue-selector"
         >
           {venues.map((v) => (
-            <option key={v.value} value={v.value}>
+            <option
+              key={v.value}
+              value={v.value}
+              disabled={!venueSupports(v.value, symbol, marketType)}
+            >
               {v.label}
             </option>
           ))}
