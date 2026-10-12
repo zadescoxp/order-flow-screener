@@ -18,7 +18,6 @@ import {
   computeOBI,
   computeZScore,
 } from "@/lib/engine/orderFlowEngine";
-import { useTerminalStore } from "@/lib/store/terminalStore";
 import type { TerminalStore } from "@/lib/store/terminalStore";
 import type { StoreApi } from "zustand";
 import type {
@@ -304,5 +303,3 @@ export class MarketDataManager {
     }, 50);
   }
 }
-
-export const marketDataManager = new MarketDataManager(useTerminalStore);

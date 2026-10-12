@@ -262,5 +262,3 @@ export const createTerminalStore = () => {
   }))
   );
 };
-
-export const useTerminalStore = createTerminalStore();
