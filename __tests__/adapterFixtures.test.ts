@@ -61,8 +61,8 @@ describe("exchange adapter payload fixtures", () => {
   });
 
   it.each([
-    ["Bybit futures", new BybitFuturesAdapter("BTCUSDT"), "perpetual"],
-    ["Bybit spot", new BybitSpotAdapter("BTCUSDT"), "spot"],
+    ["Bybit futures", new BybitFuturesAdapter("BTCUSDT")],
+    ["Bybit spot", new BybitSpotAdapter("BTCUSDT")],
   ])("normalizes %s trades", (_name, adapter) => {
     expectTrade(adapter, {
       topic: "publicTrade.BTCUSDT",
