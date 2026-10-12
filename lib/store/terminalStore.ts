@@ -22,6 +22,7 @@ import type {
   MarketTicker,
   OrderBookLevel,
 } from "@/lib/types/market";
+import { RingBuffer } from "@/lib/session/RingBuffer";
 
 // ----------------------------------------------------------
 // Terminal Settings
@@ -164,7 +165,9 @@ const INITIAL_MARKET: MarketDataState = {
 // ----------------------------------------------------------
 // Create the store
 // ----------------------------------------------------------
-export const createTerminalStore = () => create<TerminalStore>()(
+export const createTerminalStore = () => {
+  const recentTradeBuffer = new RingBuffer<NormalizedTrade>(500);
+  return create<TerminalStore>()(
   subscribeWithSelector((set) => ({
     ...INITIAL_SETTINGS,
     ...INITIAL_MARKET,
@@ -212,9 +215,10 @@ export const createTerminalStore = () => create<TerminalStore>()(
 
     // --- Market Data ---
     pushTrade: (trade) =>
-      set((s) => ({
-        recentTrades: [trade, ...s.recentTrades].slice(0, 500),
-      })),
+      set(() => {
+        recentTradeBuffer.push(trade);
+        return { recentTrades: recentTradeBuffer.newestFirst() };
+      }),
 
     updateOrderBook: (book) =>
       set({ orderBook: book }),
@@ -251,8 +255,12 @@ export const createTerminalStore = () => create<TerminalStore>()(
     setCrosshair: (crosshairTime, crosshairPrice) =>
       set({ crosshairTime, crosshairPrice }),
 
-    resetMarketData: () => set(INITIAL_MARKET),
+    resetMarketData: () => {
+      recentTradeBuffer.clear();
+      set(INITIAL_MARKET);
+    },
   }))
-);
+  );
+};
 
 export const useTerminalStore = createTerminalStore();
