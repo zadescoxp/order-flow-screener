@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useSessionStore } from "@/lib/session/SessionContext";
-import type { Venue, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
+import type { Venue, VenueSelection, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
 import type { Theme } from "@/lib/theme";
 import { venueSupports } from "@/lib/adapters/capabilities";
 import { useUIStore } from "@/lib/store/uiStore";
@@ -51,9 +51,13 @@ function ConnectionStatus() {
   const connections = useSessionStore((s) => s.connections);
   const ticker = useSessionStore((s) => s.ticker);
   const venue = useSessionStore((s) => s.venue);
-
+  const selectedVenues = useSessionStore((s) => s.selectedVenues);
+  const selectedConnections = selectedVenues.map((selected) => connections[selected]).filter(Boolean);
+  const liveCount = selectedConnections.filter((connection) => connection.status === "live").length;
+  const status = venue === "all-perps" || venue === "all-spot"
+    ? liveCount === selectedVenues.length && selectedVenues.length > 0 ? "live" : "connecting"
+    : connections[venue]?.status ?? "connecting";
   const conn = connections[venue];
-  const status = conn?.status ?? "connecting";
 
   return (
     <div className="flex items-center gap-3 ml-auto">
@@ -69,7 +73,9 @@ function ConnectionStatus() {
           }}
         >
           {status === "live"
-            ? "LIVE"
+            ? venue === "all-perps" || venue === "all-spot"
+              ? `${liveCount}/${selectedVenues.length} LIVE`
+              : "LIVE"
             : status === "connecting"
             ? "CONNECTING"
             : status.toUpperCase()}
@@ -88,6 +94,7 @@ function ConnectionStatus() {
 export default function TopBar() {
   const symbol = useSessionStore((s) => s.symbol);
   const venue = useSessionStore((s) => s.venue);
+  const selectedVenues = useSessionStore((s) => s.selectedVenues);
   const marketType = useSessionStore((s) => s.marketType);
   const timeframe = useSessionStore((s) => s.timeframe);
   const toolProfile = useUIStore((s) => s.toolProfile);
@@ -95,6 +102,7 @@ export default function TopBar() {
 
   const setSymbol = useSessionStore((s) => s.setSymbol);
   const setVenue = useSessionStore((s) => s.setVenue);
+  const setSelectedVenues = useSessionStore((s) => s.setSelectedVenues);
   const setMarketType = useSessionStore((s) => s.setMarketType);
   const setTimeframe = useSessionStore((s) => s.setTimeframe);
   const setToolProfile = useUIStore((s) => s.setToolProfile);
@@ -103,6 +111,7 @@ export default function TopBar() {
 
   const assets = marketType === "perpetual" ? ASSETS_PERP : ASSETS_SPOT;
   const venues = marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
+  const aggregateValue: VenueSelection = marketType === "perpetual" ? "all-perps" : "all-spot";
 
   const changeStr =
     ticker
@@ -205,9 +214,22 @@ export default function TopBar() {
         <select
           className="terminal-select"
           value={venue}
-          onChange={(e) => setVenue(e.target.value as Venue)}
+          onChange={(e) => {
+            const nextVenue = e.target.value as VenueSelection;
+            setVenue(nextVenue);
+            if (nextVenue === aggregateValue) {
+              setSelectedVenues(
+                venues
+                  .filter((candidate) => venueSupports(candidate.value, symbol, marketType))
+                  .map((candidate) => candidate.value)
+              );
+            }
+          }}
           id="venue-selector"
         >
+          <option value={aggregateValue}>
+            {marketType === "perpetual" ? "All perps" : "All spot"}
+          </option>
           {venues.map((v) => (
             <option
               key={v.value}
@@ -220,6 +242,28 @@ export default function TopBar() {
         </select>
         <span className="select-arrow">▾</span>
       </div>
+
+      {(venue === "all-perps" || venue === "all-spot") && (
+        <div style={{ display: "flex", gap: 2 }}>
+          {venues.map((v) => {
+            const enabled = selectedVenues.includes(v.value);
+            return (
+              <button
+                key={v.value}
+                className={`tab ${enabled ? "active" : ""}`}
+                onClick={() => setSelectedVenues(
+                  enabled
+                    ? selectedVenues.filter((selected) => selected !== v.value)
+                    : [...selectedVenues, v.value]
+                )}
+                title={`${enabled ? "Exclude" : "Include"} ${v.label}`}
+              >
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="topbar-sep" />
 

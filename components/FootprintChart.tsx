@@ -399,7 +399,10 @@ export default function FootprintChart({ height }: FootprintChartProps) {
         // Are we in the bottom table area?
         if (y >= chartH) {
            const title = "Candle Summary Metrics";
-           const content = `Delta: ${candle.delta.toFixed(1)} (Net Buying/Selling Pressure)\nCum Delta: ${candle.cumulativeDelta.toFixed(1)} (Session Trend)\nTotal Volume: ${candle.volume.toFixed(1)}\n\nWhat this means: Delta shows who is in control for this candle. Positive means aggressive buyers, negative means aggressive sellers.`;
+           const venueVolumeText = Object.entries(candle.venueVolumes)
+             .map(([venue, volume]) => `${venue}: ${(volume ?? 0).toFixed(1)}`)
+             .join("\n");
+           const content = `Delta: ${candle.delta.toFixed(1)} (Net Buying/Selling Pressure)\nCum Delta: ${candle.cumulativeDelta.toFixed(1)} (Session Trend)\nTotal Volume: ${candle.volume.toFixed(1)}\n${venueVolumeText ? `\nVolume by venue:\n${venueVolumeText}` : ""}\n\nWhat this means: Delta shows who is in control for this candle. Positive means aggressive buyers, negative means aggressive sellers.`;
            showTooltip(title, content, e);
            setCrosshair(candle.openTime, null);
            return;

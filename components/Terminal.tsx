@@ -15,6 +15,7 @@ import DepthOfMarket from "@/components/DepthOfMarket";
 import VolatilityPanel from "@/components/VolatilityPanel";
 import TradesProfilePanel from "@/components/TradesProfile";
 import GlobalTooltip from "@/components/GlobalTooltip";
+import ConnectionStatusBar from "@/components/ConnectionStatus";
 import type { MarketTicker, PanelVisibility } from "@/lib/types/market";
 
 // ─── Main Terminal Layout ────────────────────────────────────────
@@ -48,6 +49,9 @@ function SessionTerminal() {
     >
       <GlobalTooltip />
       <TopBar />
+      <div style={{ padding: "3px 10px", background: "var(--bg-base)" }}>
+        <ConnectionStatusBar />
+      </div>
 
       <div
         style={{
