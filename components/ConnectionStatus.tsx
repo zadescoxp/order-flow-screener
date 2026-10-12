@@ -49,7 +49,7 @@ export default function ConnectionStatusBar() {
           style={{ display: "flex", alignItems: "center", gap: 4 }}
           title={`${conn.venue}: ${conn.status}${
             conn.latencyMs ? ` (${conn.latencyMs}ms)` : ""
-          }`}
+          }${conn.error ? ` — ${conn.error}` : ""}`}
         >
           <ConnectionDot status={conn.status} />
           <span style={{ color: conn.status === "live" ? "var(--text-secondary)" : "var(--text-muted)" }}>

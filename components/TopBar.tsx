@@ -59,7 +59,7 @@ function ConnectionStatus() {
       <div className="flex items-center gap-2">
         <span
           className={`status-dot ${status}`}
-          title={status}
+          title={conn?.error ?? status}
         />
         <span
           style={{
