@@ -17,6 +17,7 @@ import TradesProfilePanel from "@/components/TradesProfile";
 import GlobalTooltip from "@/components/GlobalTooltip";
 import ConnectionStatusBar from "@/components/ConnectionStatus";
 import type { MarketTicker, PanelVisibility } from "@/lib/types/market";
+import BugReportDialog from "@/components/BugReportDialog";
 
 // ─── Main Terminal Layout ────────────────────────────────────────
 // Flex layout for resizable panels
@@ -30,6 +31,10 @@ function SessionTerminal() {
 
   const panels = useUIStore((s) => s.panels);
   const theme = useUIStore((s) => s.theme);
+  const [leftWidth, setLeftWidth] = React.useState(210);
+  const [rightWidth, setRightWidth] = React.useState(290);
+  const [tradesHeight, setTradesHeight] = React.useState(205);
+  const [obiHeight, setObiHeight] = React.useState(125);
 
   // Apply theme immediately before paint — directly sets CSS vars on :root
   useLayoutEffect(() => {
@@ -39,6 +44,7 @@ function SessionTerminal() {
   return (
     <div className="terminal-shell">
       <GlobalTooltip />
+      <BugReportDialog />
       <TopBar />
       <div className="status-strip">
         <ConnectionStatusBar />
@@ -47,8 +53,9 @@ function SessionTerminal() {
       <div className="terminal-workspace">
         {/* ── LEFT: Volume Profile ── */}
         {panels.volumeProfile && (
-          <div className="workspace-left">
+          <div className="workspace-left" style={{ width: leftWidth }}>
             <VolumeProfilePanel />
+            <ResizeHandle direction="right" onResize={(delta) => setLeftWidth((width) => clamp(width + delta, 150, 420))} />
           </div>
         )}
 
@@ -57,24 +64,68 @@ function SessionTerminal() {
 
         {/* ── RIGHT: Trades Profile + OBI + Order Book ── */}
         {panels.orderBook && (
-          <div className="workspace-right">
+          <div className="workspace-right" style={{ width: rightWidth }}>
             {panels.tradesProfile && (
-              <div className="workspace-right-section trades-section">
+              <div className="workspace-right-section trades-section" style={{ height: tradesHeight }}>
                 <TradesProfilePanel />
+                <ResizeHandle direction="bottom" onResize={(delta) => setTradesHeight((height) => clamp(height + delta, 100, 420))} />
               </div>
             )}
             {panels.obi && (
-              <div className="workspace-right-section obi-section">
+              <div className="workspace-right-section obi-section" style={{ height: obiHeight }}>
                 <OBIPanel />
+                <ResizeHandle direction="bottom" onResize={(delta) => setObiHeight((height) => clamp(height + delta, 70, 260))} />
               </div>
             )}
             <div className="workspace-orderbook">
               <OrderBookPanel />
             </div>
+            <ResizeHandle direction="left" onResize={(delta) => setRightWidth((width) => clamp(width - delta, 220, 460))} />
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function ResizeHandle({
+  direction,
+  onResize,
+}: {
+  direction: "left" | "right" | "top" | "bottom";
+  onResize: (delta: number) => void;
+}) {
+  const start = React.useRef(0);
+  return (
+    <span
+      className={`resize-handle resize-handle-${direction}`}
+      role="separator"
+      aria-orientation={direction === "bottom" ? "horizontal" : "vertical"}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        start.current = direction === "bottom" || direction === "top" ? event.clientY : event.clientX;
+        const move = (moveEvent: PointerEvent) => {
+          const current = direction === "bottom" || direction === "top" ? moveEvent.clientY : moveEvent.clientX;
+          const delta = current - start.current;
+          if (delta !== 0) {
+            onResize(delta);
+            start.current = current;
+          }
+        };
+        const stop = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", stop);
+          document.body.classList.remove("is-resizing");
+        };
+        document.body.classList.add("is-resizing");
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", stop, { once: true });
+      }}
+    />
   );
 }
 
@@ -85,6 +136,8 @@ function CenterColumn({ panels }: { panels: PanelVisibility }) {
   const venue = useSessionStore((s) => s.venue);
   const timeframe = useSessionStore((s) => s.timeframe);
   const marketType = useSessionStore((s) => s.marketType);
+  const [volatilityHeight, setVolatilityHeight] = React.useState(140);
+  const [domHeight, setDomHeight] = React.useState(140);
 
   return (
     <div className="workspace-center">
@@ -103,14 +156,16 @@ function CenterColumn({ panels }: { panels: PanelVisibility }) {
       </div>
 
       {panels.volatility && (
-        <div className="workspace-bottom-panel">
+        <div className="workspace-bottom-panel" style={{ height: volatilityHeight }}>
           <VolatilityPanel />
+          <ResizeHandle direction="top" onResize={(delta) => setVolatilityHeight((height) => clamp(height - delta, 90, 360))} />
         </div>
       )}
 
       {panels.depthOfMarket && (
-        <div className="workspace-bottom-panel">
+        <div className="workspace-bottom-panel" style={{ height: domHeight }}>
           <DepthOfMarket />
+          <ResizeHandle direction="top" onResize={(delta) => setDomHeight((height) => clamp(height - delta, 90, 360))} />
         </div>
       )}
     </div>
