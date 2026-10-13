@@ -22,6 +22,7 @@ export const VENUE_CONFIG: Record<Venue, VenueConfig | undefined> = {
   "okx-futures": undefined,
   "okx-spot": undefined,
   "bitget-futures": undefined,
+  "bitget-spot": undefined,
   hyperliquid: undefined,
   deribit: undefined,
   "coinbase-spot": undefined,
