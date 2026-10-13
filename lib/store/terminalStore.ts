@@ -223,6 +223,7 @@ export const createTerminalStore = () => {
           selectedVenues: newVenue === "all-forex"
             ? ["oanda-forex", "polygon-forex", "finnhub-forex", "mt5-forex"]
             : [newVenue as Venue],
+          tickSize: marketType === "forex" ? 0.00001 : s.tickSize,
           ...INITIAL_MARKET,
         };
       }),
