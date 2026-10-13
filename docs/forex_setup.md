@@ -1,47 +1,39 @@
 # Forex streaming setup
 
-Forex is selected from the **Asset class** control in the terminal. The same
-footprint, traded-volume heatmap, volume profile, OBI, order book, and
-volatility pipeline is used for Forex and crypto after each adapter normalizes
-its quote stream.
+Forex mode exposes only the supported currency-pair selector. The data source
+is intentionally internal to the application, so users do not choose or see a
+Forex venue.
 
-## Providers
+The application uses Finnhub's browser WebSocket stream:
 
-| Provider | Venue | Environment | Symbol format |
-| --- | --- | --- | --- |
-| Massive.com | Massive | `NEXT_PUBLIC_MASSIVE_API_KEY` | `EUR/USD` |
-| Finnhub | Finnhub | `NEXT_PUBLIC_FINNHUB_API_KEY` | `EUR/USD` |
-| MT5 bridge | MT5 bridge | optional `NEXT_PUBLIC_MT5_WS_URL` | `EUR/USD` |
+```text
+wss://ws.finnhub.io?token=YOUR_FINNHUB_API_KEY
+```
 
-The Massive browser stream is `wss://socket.massive.com/forex`. The adapter
-authenticates first with `{"action":"auth","params":"YOUR_API_KEY"}` and only
-then subscribes to `C.EUR-USD` (or the selected pair). Massive quote messages
-use `p` for the pair, `b` for bid, `a` for ask, and `t` for the Unix timestamp.
-The browser streams for the other providers are
-`wss://ws.finnhub.io?token=...`, and the local MT5 bridge URL respectively.
-
-Copy the required variables into `.env.local` before starting Next.js:
+Set the key in `.env.local`:
 
 ```bash
-NEXT_PUBLIC_MASSIVE_API_KEY=...
 NEXT_PUBLIC_FINNHUB_API_KEY=...
-NEXT_PUBLIC_MT5_WS_URL=ws://127.0.0.1:8765
 ```
 
-The direct browser adapters use `NEXT_PUBLIC_*` variables because the streams
-are opened by the client. Only use provider keys that are intended for
-browser-side streaming, or place a provider-specific proxy in front of the
-application when the provider requires a secret credential.
-
-The MT5 bridge must accept:
+Finnhub subscriptions use its OANDA symbol namespace internally, for example:
 
 ```json
-{"action":"subscribe","symbol":"EURUSD"}
+{"type":"subscribe","symbol":"OANDA:EUR_USD"}
 ```
 
-and emit quote messages containing `bid` and `ask` (or `price`), with optional
-`volume` and `timestamp` fields.
+Available pairs:
+
+- EUR/USD
+- GBP/USD
+- USD/JPY
+- AUD/USD
+- USD/CAD
+
+The stream is normalized into the same trade and quote structures used by the
+crypto adapters, so the footprint, traded-volume heatmap, volume profile, OBI,
+order book, and volatility panels use the same analytics pipeline.
 
 Forex is considered open from Sunday 17:00 through Friday 17:00 in New York
-time. Outside that window the selected adapter publishes
-`stateFlag: "MARKET CLOSED 🚫"` and does not feed stale quotes into analytics.
+time. Outside that window the application displays `MARKET CLOSED 🚫` and does
+not feed stale quotes into analytics.
