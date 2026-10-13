@@ -66,6 +66,7 @@ abstract class ForexAdapter extends BaseExchangeAdapter {
 export class MassiveForexAdapter extends ForexAdapter {
   readonly venue: Venue = "massive-forex";
   private readonly baseUrl = VENUE_CONFIG[this.venue]!.websocketUrl;
+  private authenticated = false;
 
   protected buildWsUrl(): string { return this.baseUrl; }
 
@@ -75,17 +76,37 @@ export class MassiveForexAdapter extends ForexAdapter {
       this.reportError("Missing NEXT_PUBLIC_MASSIVE_API_KEY");
       return;
     }
+    this.authenticated = false;
     this.ws?.send(JSON.stringify({ action: "auth", params: key }));
-    this.ws?.send(JSON.stringify({
-      action: "subscribe",
-      params: `C.${VENUE_CONFIG[this.venue]!.formatSymbol(this.symbol)}`,
-    }));
   }
 
   protected handleMessage(raw: unknown): void {
-    const message = raw as { ev?: string; p?: number; b?: number; a?: number; t?: number; s?: number };
-    if (message.ev !== "C") return;
-    this.emitQuote(Number(message.b), Number(message.a), Number(message.t), Number(message.s));
+    const messages = Array.isArray(raw) ? raw : [raw];
+    for (const item of messages) {
+      const message = item as {
+        ev?: string;
+        status?: string;
+        message?: string;
+        p?: string;
+        b?: number;
+        a?: number;
+        t?: number;
+      };
+      if (message.ev === "status") {
+        if (message.status === "auth_success") {
+          this.authenticated = true;
+          this.ws?.send(JSON.stringify({
+            action: "subscribe",
+            params: `C.${VENUE_CONFIG[this.venue]!.formatSymbol(this.symbol)}`,
+          }));
+        } else if (message.status === "auth_failed") {
+          this.reportError(message.message ?? "Massive authentication failed");
+        }
+        continue;
+      }
+      if (message.ev !== "C" || !this.authenticated) continue;
+      this.emitQuote(Number(message.b), Number(message.a), Number(message.t), 1, `${this.venue}-${message.p}-${message.t}`);
+    }
   }
 
   protected sendPing(): void {
