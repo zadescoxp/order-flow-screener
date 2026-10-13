@@ -1,5 +1,6 @@
 import { isForexMarketOpen } from "@/lib/adapters/forex";
 import { venueSupports, venuesForSelection } from "@/lib/adapters/capabilities";
+import { VENUE_CONFIG } from "@/lib/config/venues";
 
 describe("Forex market support", () => {
   it("keeps the FX market closed between Friday 17:00 and Sunday 17:00 New York time", () => {
@@ -16,5 +17,9 @@ describe("Forex market support", () => {
       "finnhub-forex",
       "mt5-forex",
     ]);
+  });
+
+  it("formats Massive subscriptions with the documented C ticker channel", () => {
+    expect(VENUE_CONFIG["massive-forex"]?.formatSymbol("EUR/USD")).toBe("EUR-USD");
   });
 });

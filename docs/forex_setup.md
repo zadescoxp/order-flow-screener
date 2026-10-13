@@ -13,7 +13,11 @@ its quote stream.
 | Finnhub | Finnhub | `NEXT_PUBLIC_FINNHUB_API_KEY` | `EUR/USD` |
 | MT5 bridge | MT5 bridge | optional `NEXT_PUBLIC_MT5_WS_URL` | `EUR/USD` |
 
-The browser streams are `wss://socket.massive.com/forex`,
+The Massive browser stream is `wss://socket.massive.com/forex`. The adapter
+authenticates first with `{"action":"auth","params":"YOUR_API_KEY"}` and only
+then subscribes to `C.EUR-USD` (or the selected pair). Massive quote messages
+use `p` for the pair, `b` for bid, `a` for ask, and `t` for the Unix timestamp.
+The browser streams for the other providers are
 `wss://ws.finnhub.io?token=...`, and the local MT5 bridge URL respectively.
 
 Copy the required variables into `.env.local` before starting Next.js:
