@@ -23,6 +23,7 @@ export default function OrderBookPanel() {
   const orderBookMode = useSessionStore((s) => s.orderBookMode);
   const setOrderBookMode = useSessionStore((s) => s.setOrderBookMode);
   const ticker = useSessionStore((s) => s.ticker);
+  const marketType = useSessionStore((s) => s.marketType);
   const sessionStore = useSessionStoreApi();
   const displayBook = orderBookMode === "aggregated" && sessionStore.getState().aggregatedBook 
     ? sessionStore.getState().aggregatedBook 
@@ -44,6 +45,7 @@ export default function OrderBookPanel() {
 
   // Grouping logic for Compact mode
   const tickSize = sessionStore.getState().tickSize;
+  const priceDigits = marketType === "forex" ? 5 : undefined;
   const groupFactor = orderBookMode === "compact" ? 10 : (orderBookMode === "aggregated" ? 5 : 1);
   const effectiveTickSize = tickSize * groupFactor;
 
@@ -170,7 +172,7 @@ export default function OrderBookPanel() {
             {formatTickPrice(midPrice, tickSize)}
           </span>
           <span style={{ fontSize: 9.5, color: "var(--text-muted)" }}>
-            Spread {spread.toFixed(1)} ({spreadPct.toFixed(3)}%)
+            Spread {spread.toFixed(priceDigits ?? 1)} ({spreadPct.toFixed(3)}%)
           </span>
         </div>
 
