@@ -40,8 +40,7 @@ const VENUES_SPOT: { value: Venue; label: string }[] = [
   { value: "bitget-spot", label: "Bitget" },
 ];
 const VENUES_FOREX: { value: Venue; label: string }[] = [
-  { value: "oanda-forex", label: "OANDA" },
-  { value: "polygon-forex", label: "Polygon" },
+  { value: "massive-forex", label: "Massive" },
   { value: "finnhub-forex", label: "Finnhub" },
   { value: "mt5-forex", label: "MT5 bridge" },
 ];
