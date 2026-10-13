@@ -21,10 +21,6 @@ export function isForexMarketOpen(date = new Date()): boolean {
   return true;
 }
 
-function pairSymbol(symbol: string): string {
-  return symbol.replace(/[/_]/g, "-").toUpperCase();
-}
-
 abstract class ForexAdapter extends BaseExchangeAdapter {
   protected readonly marketType = "forex" as const;
 
@@ -36,7 +32,7 @@ abstract class ForexAdapter extends BaseExchangeAdapter {
     id = `${this.venue}-${timestamp}`,
   ): void {
     if (!isForexMarketOpen(new Date(timestamp))) {
-      this.reportError("MARKET CLOSED 🚫");
+      this.reportError("MARKET CLOSED 🚫", "MARKET CLOSED 🚫");
       return;
     }
     if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0 || ask < bid) return;
