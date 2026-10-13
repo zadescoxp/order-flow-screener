@@ -210,6 +210,7 @@ function ChartHeader({
     .split("-")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+  const isForex = marketType === "forex";
 
   return (
     <div
@@ -228,8 +229,8 @@ function ChartHeader({
       <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>{symbol}</span>
       <span style={{ color: "var(--text-muted)" }}>·</span>
       <span style={{ color: "var(--text-muted)" }}>{timeframe}</span>
-      <span style={{ color: "var(--text-muted)" }}>·</span>
-      <span style={{ color: "var(--text-secondary)" }}>{formattedVenue}</span>
+      {!isForex && <><span style={{ color: "var(--text-muted)" }}>·</span>
+      <span style={{ color: "var(--text-secondary)" }}>{formattedVenue}</span></>}
       <span style={{ color: "var(--text-muted)" }}>
         ({marketType.charAt(0).toUpperCase() + marketType.slice(1)})
       </span>

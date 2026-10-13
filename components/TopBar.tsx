@@ -39,12 +39,6 @@ const VENUES_SPOT: { value: Venue; label: string }[] = [
   { value: "bybit-spot", label: "Bybit" },
   { value: "bitget-spot", label: "Bitget" },
 ];
-const VENUES_FOREX: { value: Venue; label: string }[] = [
-  { value: "massive-forex", label: "Massive" },
-  { value: "finnhub-forex", label: "Finnhub" },
-  { value: "mt5-forex", label: "MT5 bridge" },
-];
-
 const TIMEFRAMES: Timeframe[] = ["1m", "5m", "15m", "30m", "1h", "4h"];
 
 const PROFILES: { value: ToolProfile; label: string }[] = [
@@ -61,7 +55,7 @@ function ConnectionStatus() {
   const selectedVenues = useSessionStore((s) => s.selectedVenues);
   const selectedConnections = selectedVenues.map((selected) => connections[selected]).filter(Boolean);
   const liveCount = selectedConnections.filter((connection) => connection.status === "live").length;
-  const status = venue === "all-perps" || venue === "all-spot" || venue === "all-forex"
+  const status = venue === "all-perps" || venue === "all-spot"
     ? liveCount === selectedVenues.length && selectedVenues.length > 0 ? "live" : "connecting"
     : connections[venue]?.status ?? "connecting";
   const conn = connections[venue];
@@ -80,7 +74,7 @@ function ConnectionStatus() {
           }}
         >
           {conn?.stateFlag ?? (status === "live"
-            ? venue === "all-perps" || venue === "all-spot" || venue === "all-forex"
+            ? venue === "all-perps" || venue === "all-spot"
               ? `${liveCount}/${selectedVenues.length} LIVE`
               : "LIVE"
             : status === "connecting"
@@ -120,8 +114,8 @@ export default function TopBar() {
 
   const isForex = marketType === "forex";
   const assets = isForex ? ASSETS_FOREX : marketType === "perpetual" ? ASSETS_PERP : ASSETS_SPOT;
-  const venues = isForex ? VENUES_FOREX : marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
-  const aggregateValue: VenueSelection = isForex ? "all-forex" : marketType === "perpetual" ? "all-perps" : "all-spot";
+  const venues = marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
+  const aggregateValue: VenueSelection = marketType === "perpetual" ? "all-perps" : "all-spot";
   const priceDigits = isForex ? 5 : 1;
 
   const changeStr =
@@ -238,10 +232,10 @@ export default function TopBar() {
         <span className="select-arrow">▾</span>
       </div>
 
-      <div className="topbar-sep" />
+      {!isForex && <div className="topbar-sep" />}
 
-      {/* ── Venue ── */}
-      <div className="select-wrap">
+      {/* ── Venue (crypto only) ── */}
+      {!isForex && <div className="select-wrap">
         <select
           className="terminal-select"
           value={venue}
@@ -272,9 +266,9 @@ export default function TopBar() {
           ))}
         </select>
         <span className="select-arrow">▾</span>
-      </div>
+      </div>}
 
-      {(venue === "all-perps" || venue === "all-spot" || venue === "all-forex") && (
+      {!isForex && (venue === "all-perps" || venue === "all-spot") && (
         <div style={{ display: "flex", gap: 2 }}>
           {venues.map((v) => {
             const enabled = selectedVenues.includes(v.value);
