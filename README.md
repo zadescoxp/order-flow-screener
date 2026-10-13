@@ -1,151 +1,365 @@
 # Order Flow Tracker
 
-**Production-ready, open-source, real-time crypto market-data screening terminal.**
+Order Flow Tracker is a real-time market data terminal for studying executed
+volume, price distribution, liquidity, and market microstructure. It provides a
+compact analytical workspace for crypto markets and selected foreign-exchange
+pairs.
 
-> ⚡ Live footprint charts · Heatmaps · Order book · OBI · Volume Profile · Depth of Market · Volatility Z-Score
+The application is an analysis and screening tool. It does not place trades,
+manage orders, connect to brokerage accounts, or manage portfolios.
 
-![Order Flow Tracker Demo](./demo.gif)
+## Overview
 
----
+The terminal combines live WebSocket market data with a normalized order-flow
+engine. Exchange-specific payloads are converted into common trade and order
+book structures before they are processed by the charts and analytics panels.
 
-## What This Is
-
-A professional **market-data and order-flow screener** for crypto perpetuals and spot markets.
-
-**This is NOT a trading application.** There is:
-- ❌ No trading
-- ❌ No order execution  
-- ❌ No buy/sell buttons
-- ❌ No broker integration
-- ❌ No portfolio management
-
-Users **observe**, **analyze**, **compare** and **screen** live market data.
-
----
-
-## Supported Exchanges
-
-### Perpetuals
-| Exchange | Status |
-|----------|--------|
-| Binance Futures | ✅ Live |
-| Bybit Futures | ✅ Live |
-| OKX Futures | ✅ Live |
-| Bitget Futures | ✅ Live |
-| Hyperliquid | ✅ Live |
-| Deribit | ✅ Live |
-
-### Spot
-| Exchange | Status |
-|----------|--------|
-| Binance Spot | ✅ Live |
-| Bybit Spot | ✅ Live |
-| OKX Spot | ✅ Live |
-| Bitget Spot | ✅ Live |
-| Coinbase Spot | ✅ Live |
-
----
+```text
+WebSocket feeds
+    -> market adapters
+    -> normalized market data
+    -> order-flow engine
+    -> session store
+    -> charts and analytics panels
+```
 
 ## Features
 
-### Footprint Chart
-- Price × Time × Executed Volume visualization
-- Bid/Ask volume at every price level
-- Per-level delta (askVol - bidVol)
-- Imbalance highlighting (3x threshold, configurable)
-- Z-score volume emphasis (subtle border highlighting)
+### Footprint chart
+
+- Price, time, and executed-volume visualization
+- Bid volume, ask volume, total volume, and delta at each price level
+- Configurable imbalance highlighting
 - Stacked imbalance detection
-- Canvas-rendered for performance (no DOM elements per cell)
+- Candle OHLC, cumulative delta, and trade count
+- Canvas rendering for efficient updates
+- Crosshair interaction and synchronized chart context
 
-### Heatmaps
-- Traded-volume heatmap is enabled by default and keeps a 10-minute typed-array window.
-- Volume intensity is clipped near the 95th percentile and uses the active terminal theme.
-- Aggregated venue selections combine traded volume and show the same time window.
-- Use the **Heatmap** button beside the Volatility control to toggle the traded-volume overlay.
+### Traded-volume heatmap
 
-### Order Book
-- Live bid/ask levels with cumulative depth bars
-- Single venue / Aggregated / Compact modes
-- Spread display
+- Enabled by default in the terminal
+- Shows the relationship between traded volume and price
+- Uses a typed-array time and price grid internally
+- Paints incremental updates to an offscreen canvas
+- Clips intensity near the upper percentile so one large trade does not
+  dominate the entire chart
+- Uses the active terminal theme and a low-opacity overlay
+- Combines venue data when an aggregate crypto selection is active
 
-### OBI (Order Book Imbalance)
-- Current OBI value: -1 (ask-heavy) → 0 (balanced) → +1 (bid-heavy)
-- Historical OBI chart with fill gradient
+The heatmap represents executed volume. It is not a resting-order-book
+visualization.
 
-### Volume Profile & Trades Profile
-- Horizontal volume profile by price
-- Total / Buy / Sell / Delta tabs
-- POC, VAH, VAL identification
-- Executed trade distribution by price
+### Volume and trade profiles
 
-### Depth of Market & Volatility
-- Cumulative bid/ask depth curve
-- Rolling Z-score of trade volume
-- Color-coded: ±1 (yellow), ±2 (orange), ±3 (red)
-- Configurable rolling windows: 20, 50, 100, 200
+- Horizontal volume distribution by price
+- Total, buy, sell, and delta views
+- Point of control (POC)
+- Value area high (VAH)
+- Value area low (VAL)
+- Executed-trade distribution in the trades profile
 
-![Order Flow Tracker Features](./features.gif)
+### Order book
 
----
+- Live bid and ask levels
+- Cumulative depth bars
+- Spread and spread percentage
+- Single, aggregated, and compact display modes
+- Bid and ask visual separation
+- Hover details for individual levels
 
-## How to Use It
+### Order book imbalance
 
-1. **Select an Asset and Venue:** Use the Top Bar to select whether you want to analyze Spot or Perpetual markets, select your target asset (e.g. BTCUSDT), and choose the specific exchange.
-2. **Customize Your Workspace:** Click on the tabs in the Top Bar to toggle modules on/off (Heatmap, Order Book, Volume Profile, OBI, Volatility, DOM).
-3. **Analyze Data:** Hover over any data point on the terminal—whether on the footprint chart, the DOM, or the profiles—to read a detailed tooltip explaining exactly what the data means.
-4. **Resize Panels:** Adjust the screen layout by dragging the borders between panels to fit your specific trading/screening setup.
+The OBI panel displays the relative balance between bid and ask liquidity:
 
----
+```text
+OBI = (bid liquidity - ask liquidity) / (bid liquidity + ask liquidity)
+```
 
-## How to Contribute
+The value ranges from -1 to +1. Positive values indicate greater bid
+liquidity, negative values indicate greater ask liquidity, and zero indicates
+balance.
 
-We welcome contributions from the community! If you're a developer or designer who wants to improve Order Flow Tracker:
+### Depth of market
 
-1. **Fork the Repository:** Start by forking the project to your own GitHub account.
-2. **Clone Locally:** `git clone https://github.com/your-username/order-flow-tracker.git`
-3. **Create a Branch:** Create a feature branch (`git checkout -b feature/amazing-feature`).
-4. **Make Changes:** Add your new exchange adapter, indicator, or UI improvement.
-5. **Run Tests:** Ensure you haven't broken the engine logic by running `npm test`.
-6. **Submit a Pull Request:** Push to your fork and submit a PR to the main repository.
+- Cumulative bid and ask depth curves
+- Mid-price reference
+- Crosshair price inspection
+- Live updates from the normalized order book
 
-If you find a bug or have a feature request, please open an issue in the GitHub repository. 
+### Volatility and volume analytics
 
----
+- Rolling z-score visualization
+- Configurable analysis windows
+- Price-movement-based volatility input for Forex data
+- Volume-based z-score input for crypto data
 
-## Future Updates 🚀
+### Workspace controls
 
-We are actively working on this project! Order Flow Tracker is still evolving, and we will be introducing even more updates, features, and refinements in the future. Stay tuned for advanced cross-venue aggregation, more analytical modules, and further UI polish.
+- Crypto and Forex asset-class switching
+- Crypto spot and perpetual market selection
+- Supported venue selection for crypto
+- Currency-pair selection for Forex
+- Timeframe selection from one minute to four hours
+- Tool profiles for order-flow, liquidity, and volatility workflows
+- Theme selection
+- Panel visibility controls
+- Pointer-based panel resizing from visible borders
+- Responsive single-column layout on smaller screens
+- First-visit bug-report dialog with issue and direct-message options
 
----
+## Supported markets
 
-## Getting Started (Development)
+### Crypto perpetual markets
+
+| Venue | Adapter status |
+| --- | --- |
+| Binance Futures | Supported |
+| Bybit Futures | Supported |
+| OKX Futures | Supported |
+| Bitget Futures | Supported |
+| Hyperliquid | Supported |
+| Deribit | Supported |
+
+### Crypto spot markets
+
+| Venue | Adapter status |
+| --- | --- |
+| Binance Spot | Supported |
+| Bybit Spot | Supported |
+| OKX Spot | Supported |
+| Bitget Spot | Supported |
+| Coinbase Spot | Supported |
+
+### Forex
+
+Forex currently uses Finnhub as the internal data source. The provider is not
+selectable in the user interface. Users choose only the currency pair.
+
+Available pairs:
+
+- EUR/USD
+- GBP/USD
+- USD/JPY
+- AUD/USD
+- USD/CAD
+
+Forex subscriptions use Finnhub's OANDA symbol namespace internally. For
+example, EUR/USD is subscribed as `OANDA:EUR_USD`.
+
+## Forex data model
+
+Finnhub's browser WebSocket stream provides Forex trade ticks but does not
+provide a full exchange-native level-2 order book for these pairs. The
+application therefore:
+
+- Normalizes each tick into the common trade structure
+- Classifies tick direction using price movement
+- Builds a responsive bid and ask quote proxy for the shared book pipeline
+- Derives OBI and depth visuals from that quote proxy
+- Derives Forex volatility from normalized price movement
+
+Forex OBI and depth should therefore be interpreted as quote-flow indicators,
+not as a complete view of all resting liquidity across the foreign-exchange
+market.
+
+Forex market hours are enforced using New York time. The application considers
+the market open from Sunday at 17:00 through Friday at 17:00. When the market
+is closed, the connection status reports the closed state and stale quotes are
+not passed into analytics.
+
+## Requirements
+
+- Node.js 20 or newer
+- npm
+- A Finnhub API key for Forex mode
+- Network access to the selected WebSocket market-data feeds
+
+Crypto adapters may require additional exchange-specific configuration as the
+project evolves. Review the adapter and venue configuration files before
+deploying a new venue.
+
+## Installation
+
+Clone the repository and install dependencies:
 
 ```bash
-# Install dependencies
+git clone https://github.com/zadescoxp/order-flow-screener.git
+cd order-flow-tracker
 npm install
+```
 
-# Run development server
+## Environment configuration
+
+Create a local environment file:
+
+```bash
+cp .env.example .env.local
+```
+
+If `.env.example` is not present in your checkout, create `.env.local`
+manually and add:
+
+```bash
+NEXT_PUBLIC_FINNHUB_API_KEY=your_finnhub_api_key
+```
+
+Never commit `.env.local`, API keys, or other credentials. The key is exposed
+to the browser because the Finnhub stream is opened from the client. Use a
+restricted development key and follow Finnhub's account and usage policies.
+
+More Forex-specific details are available in
+[docs/forex_setup.md](./docs/forex_setup.md).
+
+## Development
+
+Start the development server:
+
+```bash
 npm run dev
-
-# Run tests
-npm test
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
----
+Create a production build:
 
-## Architecture & Tech Stack
-
-**Tech:** Next.js 16, React 19, TypeScript, Tailwind CSS 4, Zustand, Canvas API.
-**Data:** Live WebSocket exchange feeds normalized through our engine.
-
-```
-Exchange WebSockets → Exchange Adapters → Order Flow Engine → Zustand Store → React Components
+```bash
+npm run build
 ```
 
----
+Start the production server after building:
+
+```bash
+npm run start
+```
+
+Run the test suite:
+
+```bash
+npm test
+```
+
+Run the linter:
+
+```bash
+npm run lint
+```
+
+## Using the terminal
+
+1. Choose Crypto or Forex in the Market selector.
+2. Choose an instrument from the Instrument selector.
+3. Select a timeframe.
+4. For Crypto, choose a spot or perpetual market and venue. Forex uses the
+   internal Finnhub source automatically.
+5. Use the Flow, Liquidity, and Volatility profile controls to activate
+   relevant panels.
+6. Toggle the traded-volume Heatmap independently.
+7. Hover chart, profile, depth, and order-book elements for details.
+8. Drag a panel border when the resize handle appears to adjust its size.
+9. Use the theme selector to change the visual theme without changing
+   analytical behavior.
+
+The connection status strip reports the current data-source state. If a feed
+disconnects, the adapter retries with an increasing reconnect delay.
+
+## Project structure
+
+```text
+app/
+  page.tsx                 Application entry point
+  globals.css              Global layout and theme styles
+
+components/
+  Terminal.tsx             Main terminal shell and panel layout
+  TopBar.tsx               Market and workspace controls
+  FootprintChart.tsx       Footprint chart and traded-volume heatmap
+  OrderBook.tsx            Order-book panel
+  VolumeProfile.tsx        Volume profile
+  TradesProfile.tsx        Executed-trade profile
+  OBIPanel.tsx             Order-book imbalance chart
+  DepthOfMarket.tsx        Cumulative depth chart
+  VolatilityPanel.tsx      Volatility and z-score chart
+  ui/                      Shared interface primitives
+
+lib/adapters/
+  exchanges.ts             Crypto adapter factory
+  forex.ts                 Finnhub Forex adapter
+  capabilities.ts          Venue and symbol capability checks
+
+lib/engine/
+  orderFlowEngine.ts       Candle, footprint, volume, OBI, and z-score logic
+
+lib/managers/
+  marketDataManager.ts     Adapter lifecycle and analytics dispatch
+
+lib/store/
+  terminalStore.ts         Session market data and terminal settings
+  uiStore.ts               Shared UI settings
+
+docs/
+  forex_setup.md            Forex connection and symbol details
+```
+
+## Design and implementation notes
+
+The application uses a per-session market store so the terminal can process
+live market data without putting exchange-specific state directly into
+presentational components. The manager batches high-frequency updates before
+dispatching them to the store.
+
+Canvas-based panels use `ResizeObserver` to adapt to their containing panel.
+Panel resizing is handled by pointer-driven split handles, with minimum and
+maximum dimensions to keep the analytics readable.
+
+Theme colors are defined as CSS variables and are reused by charts, panels,
+heatmaps, status indicators, and controls.
+
+## Troubleshooting
+
+### The connection stays in an error state
+
+Check the browser console and confirm that `.env.local` contains a valid
+`NEXT_PUBLIC_FINNHUB_API_KEY` for Forex mode. Restart the development server
+after changing environment variables.
+
+### Forex prices are not updating
+
+Confirm that the selected pair is one of the supported pairs and that Forex
+market hours are open. The terminal does not process stale ticks while the
+market is closed.
+
+### OBI or depth appears limited in Forex mode
+
+Finnhub provides trade ticks rather than a complete level-2 Forex order book.
+Forex depth and OBI are therefore derived from the normalized quote proxy
+described in the Forex data model section.
+
+### A panel is not visible
+
+Check the active tool profile and panel toggles. Panels can be independently
+enabled or disabled by the profile controls.
+
+### The layout looks incorrect after a browser resize
+
+Reload the page after resizing the browser window. Canvas panels use
+`ResizeObserver` and will recalculate their dimensions when their containers
+change.
+
+## Contributing
+
+Contributions are welcome. Before opening a pull request:
+
+1. Create a focused feature branch.
+2. Keep changes limited to the relevant feature or bug.
+3. Run the test suite, build, and linter.
+4. Explain data-source or analytics changes in the pull request description.
+5. Do not include credentials, generated build output, or local environment
+   files.
+
+For bugs, include the selected market, venue or currency pair, timeframe,
+browser, reproduction steps, and relevant console errors. Do not include API
+keys in reports.
 
 ## License
 
-Apache 2.0
+Apache License 2.0.
