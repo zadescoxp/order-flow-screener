@@ -21,6 +21,7 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
   public symbol: string;
   protected status: VenueConnection["status"] = "connecting";
   protected errorMessage: string | undefined;
+  protected stateFlag: string | undefined;
   private intentionallyOffline = false;
 
   constructor(symbol: string) {
@@ -40,6 +41,7 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
       this.reconnectAttempts = 0;
       this.lastHeartbeat = Date.now();
       this.errorMessage = undefined;
+      this.stateFlag = undefined;
       this.setStatus("live");
       this.startPingInterval();
       this.subscribe();
@@ -109,12 +111,14 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
       lastHeartbeat: this.lastHeartbeat,
       reconnectAttempts: this.reconnectAttempts,
       error: this.errorMessage,
+      stateFlag: this.stateFlag,
     };
     this.emit("status", conn);
   }
 
-  protected reportError(message: string): void {
+  protected reportError(message: string, stateFlag?: string): void {
     this.errorMessage = message;
+    this.stateFlag = stateFlag;
     this.setStatus("error");
   }
 
@@ -181,6 +185,7 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
       lastHeartbeat: this.lastHeartbeat,
       reconnectAttempts: this.reconnectAttempts,
       error: this.errorMessage,
+      stateFlag: this.stateFlag,
     };
   }
 }
