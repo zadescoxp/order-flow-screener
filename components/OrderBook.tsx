@@ -95,16 +95,16 @@ export default function OrderBookPanel() {
 
   return (
     <div
-      className="panel"
+      className="panel orderbook-modern"
       style={{ height: "100%", display: "flex", flexDirection: "column" }}
     >
-      <div className="panel-header">
-        <span className="panel-title">Order Book</span>
+      <div className="panel-header orderbook-header">
+        <div><span className="panel-title">Order Book</span><span className="orderbook-subtitle">DEPTH &amp; LIQUIDITY</span></div>
         <ModeSelector mode={orderBookMode} setMode={setOrderBookMode} />
       </div>
 
       {/* Column headers */}
-      <div
+      <div className="orderbook-columns"
         style={{
           display: "grid",
           gridTemplateColumns: "1fr 1fr 1fr",
@@ -122,7 +122,8 @@ export default function OrderBookPanel() {
 
       {/* Asks (reversed so highest ask is at top of list) */}
       <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-        <div>
+        <div className="orderbook-side asks-side">
+          <div className="orderbook-side-label"><span>ASKS</span><span className="side-percent sell">SELL PRESSURE</span></div>
           {asksWithCum.map((ask) => (
             <div 
               className="ob-row" 
@@ -177,7 +178,8 @@ export default function OrderBookPanel() {
         </div>
 
         {/* Bids */}
-        <div>
+        <div className="orderbook-side bids-side">
+          <div className="orderbook-side-label"><span>BIDS</span><span className="side-percent buy">BUY SUPPORT</span></div>
           {bidsWithCum.map((bid) => (
             <div 
               className="ob-row" 
