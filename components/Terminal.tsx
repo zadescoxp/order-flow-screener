@@ -17,6 +17,7 @@ import TradesProfilePanel from "@/components/TradesProfile";
 import GlobalTooltip from "@/components/GlobalTooltip";
 import ConnectionStatusBar from "@/components/ConnectionStatus";
 import type { MarketTicker, PanelVisibility } from "@/lib/types/market";
+import BugReportDialog from "@/components/BugReportDialog";
 
 // ─── Main Terminal Layout ────────────────────────────────────────
 // Flex layout for resizable panels
@@ -30,6 +31,10 @@ function SessionTerminal() {
 
   const panels = useUIStore((s) => s.panels);
   const theme = useUIStore((s) => s.theme);
+  const [leftWidth, setLeftWidth] = React.useState(210);
+  const [rightWidth, setRightWidth] = React.useState(290);
+  const [tradesHeight, setTradesHeight] = React.useState(205);
+  const [obiHeight, setObiHeight] = React.useState(125);
 
   // Apply theme immediately before paint — directly sets CSS vars on :root
   useLayoutEffect(() => {
@@ -37,43 +42,20 @@ function SessionTerminal() {
   }, [theme]);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        width: "100vw",
-        overflow: "hidden",
-        background: "var(--bg-base)",
-      }}
-    >
+    <div className="terminal-shell">
       <GlobalTooltip />
+      <BugReportDialog />
       <TopBar />
-      <div style={{ padding: "3px 10px", background: "var(--bg-base)" }}>
+      <div className="status-strip">
         <ConnectionStatusBar />
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          flex: 1,
-          overflow: "hidden",
-          gap: "1px",
-          background: "var(--border-muted)",
-        }}
-      >
+      <div className="terminal-workspace">
         {/* ── LEFT: Volume Profile ── */}
         {panels.volumeProfile && (
-          <div style={{ 
-            width: 180, 
-            minWidth: 100, 
-            maxWidth: 400,
-            flexShrink: 0, 
-            resize: "horizontal", 
-            overflow: "hidden", 
-            background: "var(--bg-base)" 
-          }}>
+          <div className="workspace-left" style={{ width: leftWidth }}>
             <VolumeProfilePanel />
+            <ResizeHandle direction="right" onResize={(delta) => setLeftWidth((width) => clamp(width + delta, 150, 420))} />
           </div>
         )}
 
@@ -82,38 +64,68 @@ function SessionTerminal() {
 
         {/* ── RIGHT: Trades Profile + OBI + Order Book ── */}
         {panels.orderBook && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              width: 240,
-              minWidth: 150,
-              flexShrink: 0,
-              gap: "1px",
-              background: "var(--border-muted)",
-              overflow: "hidden",
-              // We could add horizontal resize here, but native resize is bottom-right.
-              // To make it resizable, we can let the center flex: 1 take remaining space.
-              // We'll add resize: horizontal and scale it (it will expand rightwards, which is awkward, so we skip it for right pane or keep a fixed default).
-            }}
-          >
+          <div className="workspace-right" style={{ width: rightWidth }}>
             {panels.tradesProfile && (
-              <div style={{ height: "200px", minHeight: 100, resize: "vertical", flexShrink: 0, background: "var(--bg-base)", overflow: "hidden" }}>
+              <div className="workspace-right-section trades-section" style={{ height: tradesHeight }}>
                 <TradesProfilePanel />
+                <ResizeHandle direction="bottom" onResize={(delta) => setTradesHeight((height) => clamp(height + delta, 100, 420))} />
               </div>
             )}
             {panels.obi && (
-              <div style={{ height: "120px", minHeight: 60, resize: "vertical", flexShrink: 0, background: "var(--bg-base)", overflow: "hidden" }}>
+              <div className="workspace-right-section obi-section" style={{ height: obiHeight }}>
                 <OBIPanel />
+                <ResizeHandle direction="bottom" onResize={(delta) => setObiHeight((height) => clamp(height + delta, 70, 260))} />
               </div>
             )}
-            <div style={{ flex: 1, overflow: "hidden", background: "var(--bg-base)" }}>
+            <div className="workspace-orderbook">
               <OrderBookPanel />
             </div>
+            <ResizeHandle direction="left" onResize={(delta) => setRightWidth((width) => clamp(width - delta, 220, 460))} />
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function ResizeHandle({
+  direction,
+  onResize,
+}: {
+  direction: "left" | "right" | "top" | "bottom";
+  onResize: (delta: number) => void;
+}) {
+  const start = React.useRef(0);
+  return (
+    <span
+      className={`resize-handle resize-handle-${direction}`}
+      role="separator"
+      aria-orientation={direction === "bottom" ? "horizontal" : "vertical"}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        start.current = direction === "bottom" || direction === "top" ? event.clientY : event.clientX;
+        const move = (moveEvent: PointerEvent) => {
+          const current = direction === "bottom" || direction === "top" ? moveEvent.clientY : moveEvent.clientX;
+          const delta = current - start.current;
+          if (delta !== 0) {
+            onResize(delta);
+            start.current = current;
+          }
+        };
+        const stop = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", stop);
+          document.body.classList.remove("is-resizing");
+        };
+        document.body.classList.add("is-resizing");
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", stop, { once: true });
+      }}
+    />
   );
 }
 
@@ -124,19 +136,11 @@ function CenterColumn({ panels }: { panels: PanelVisibility }) {
   const venue = useSessionStore((s) => s.venue);
   const timeframe = useSessionStore((s) => s.timeframe);
   const marketType = useSessionStore((s) => s.marketType);
+  const [volatilityHeight, setVolatilityHeight] = React.useState(140);
+  const [domHeight, setDomHeight] = React.useState(140);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        flex: 1,
-        minWidth: 300,
-        overflow: "hidden",
-        background: "var(--bg-base)",
-        gap: "1px",
-      }}
-    >
+    <div className="workspace-center">
       <ChartHeader
         symbol={symbol}
         venue={venue}
@@ -145,47 +149,23 @@ function CenterColumn({ panels }: { panels: PanelVisibility }) {
         ticker={ticker}
       />
 
-      <div
-        className="panel"
-        style={{
-          flex: 1,
-          border: "none",
-          borderBottom: "1px solid var(--border)",
-          overflow: "hidden",
-        }}
-      >
+      <div className="chart-card">
         <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
           <FootprintChartWrapper />
         </div>
       </div>
 
       {panels.volatility && (
-        <div
-          style={{
-            height: 140,
-            minHeight: 100,
-            resize: "vertical",
-            flexShrink: 0,
-            background: "var(--bg-base)",
-            overflow: "hidden"
-          }}
-        >
+        <div className="workspace-bottom-panel" style={{ height: volatilityHeight }}>
           <VolatilityPanel />
+          <ResizeHandle direction="top" onResize={(delta) => setVolatilityHeight((height) => clamp(height - delta, 90, 360))} />
         </div>
       )}
 
       {panels.depthOfMarket && (
-        <div
-          style={{
-            height: 140,
-            minHeight: 100,
-            resize: "vertical",
-            flexShrink: 0,
-            background: "var(--bg-base)",
-            overflow: "hidden"
-          }}
-        >
+        <div className="workspace-bottom-panel" style={{ height: domHeight }}>
           <DepthOfMarket />
+          <ResizeHandle direction="top" onResize={(delta) => setDomHeight((height) => clamp(height - delta, 90, 360))} />
         </div>
       )}
     </div>
