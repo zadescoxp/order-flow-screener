@@ -61,6 +61,7 @@ export class MarketDataManager {
 
   // Z-score rolling volume window
   private volumeWindow: number[] = [];
+  private previousTradePrice: number | null = null;
 
   // Cumulative delta
   private cumulativeDelta = 0;
@@ -166,6 +167,7 @@ export class MarketDataManager {
     this.currentCandleRef = null;
     this.allLevels = [];
     this.volumeWindow = [];
+    this.previousTradePrice = null;
     this.cumulativeDelta = 0;
     this.store.getState().resetMarketData();
   }
@@ -245,9 +247,14 @@ export class MarketDataManager {
     };
 
     // Z-score on volume
-    this.volumeWindow.push(trade.quantity);
+    const movement = this.previousTradePrice === null
+      ? 0
+      : Math.abs(trade.price - this.previousTradePrice) / this.currentTickSize;
+    this.previousTradePrice = trade.price;
+    const volatilityInput = this.currentMarketType === "forex" ? movement : trade.quantity;
+    this.volumeWindow.push(volatilityInput);
     if (this.volumeWindow.length > 200) this.volumeWindow.shift();
-    const zScore = computeZScore(this.volumeWindow, trade.quantity);
+    const zScore = computeZScore(this.volumeWindow, volatilityInput);
     const zPoint: ZScorePoint = {
       timestamp: trade.timestamp,
       value: zScore,

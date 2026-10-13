@@ -23,6 +23,9 @@ export function isForexMarketOpen(date = new Date()): boolean {
 
 abstract class ForexAdapter extends BaseExchangeAdapter {
   protected readonly marketType = "forex" as const;
+  private previousPrice: number | null = null;
+  private previousSide: "buy" | "sell" = "buy";
+  private flowBias = 0;
 
   protected emitQuote(
     bid: number,
@@ -37,6 +40,19 @@ abstract class ForexAdapter extends BaseExchangeAdapter {
     }
     if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0 || ask < bid) return;
     const price = (bid + ask) / 2;
+    const side = this.previousPrice === null
+      ? this.previousSide
+      : price > this.previousPrice
+        ? "buy"
+        : price < this.previousPrice
+          ? "sell"
+          : this.previousSide;
+    this.previousPrice = price;
+    this.previousSide = side;
+    this.flowBias = Math.max(-0.75, Math.min(0.75, this.flowBias + (side === "buy" ? 0.08 : -0.08)));
+    const quantity = Number.isFinite(size) && size > 0 ? size : 1;
+    const bidLiquidity = quantity * (1 + this.flowBias);
+    const askLiquidity = quantity * (1 - this.flowBias);
     const trade: NormalizedTrade = {
       id,
       venue: this.venue,
@@ -44,9 +60,9 @@ abstract class ForexAdapter extends BaseExchangeAdapter {
       timestamp,
       localTimestamp: Date.now(),
       price,
-      quantity: Number.isFinite(size) && size > 0 ? size : 1,
-      quoteVolume: price * (Number.isFinite(size) && size > 0 ? size : 1),
-      side: price >= ask ? "buy" : "sell",
+      quantity,
+      quoteVolume: price * quantity,
+      side,
       marketType: this.marketType,
     };
     this.emitTrade(trade);
@@ -55,8 +71,8 @@ abstract class ForexAdapter extends BaseExchangeAdapter {
       symbol: this.symbol,
       timestamp,
       localTimestamp: Date.now(),
-      bids: [{ price: bid, size: 1, venue: this.venue }],
-      asks: [{ price: ask, size: 1, venue: this.venue }],
+      bids: [{ price: bid, size: bidLiquidity, venue: this.venue }],
+      asks: [{ price: ask, size: askLiquidity, venue: this.venue }],
     };
     this.emitOrderBook(book);
   }
