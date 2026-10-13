@@ -198,7 +198,7 @@ export const createTerminalStore = () => {
       set((s) => ({
         venue,
         selectedVenues:
-          venue === "all-perps" || venue === "all-spot" || venue === "all-forex"
+          venue === "all-perps" || venue === "all-spot"
             ? s.selectedVenues
             : [venue],
         ...INITIAL_MARKET,
@@ -216,13 +216,11 @@ export const createTerminalStore = () => {
           : s.venue.includes("spot");
         const newVenue = isValidVenue 
           ? s.venue 
-          : (marketType === "forex" ? "massive-forex" : marketType === "perpetual" ? "bybit-futures" : "bybit-spot");
+          : (marketType === "forex" ? "finnhub-forex" : marketType === "perpetual" ? "bybit-futures" : "bybit-spot");
         return {
           marketType,
           venue: newVenue as VenueSelection,
-          selectedVenues: newVenue === "all-forex"
-            ? ["massive-forex", "finnhub-forex", "mt5-forex"]
-            : [newVenue as Venue],
+          selectedVenues: [newVenue as Venue],
           tickSize: marketType === "forex" ? 0.00001 : s.tickSize,
           ...INITIAL_MARKET,
         };

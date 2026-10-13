@@ -9,7 +9,7 @@ const VENUE_SYMBOLS: Partial<Record<Venue, readonly string[]>> = {
   "coinbase-spot": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
 };
 
-const FOREX_VENUES: Venue[] = ["massive-forex", "finnhub-forex", "mt5-forex"];
+const FOREX_VENUES: Venue[] = ["finnhub-forex"];
 
 export function venueSupports(
   venue: Venue,
@@ -40,6 +40,6 @@ export function venuesForSelection(
     : marketType === "perpetual"
     ? ["binance-futures", "bybit-futures", "okx-futures", "hyperliquid", "bitget-futures", "deribit"]
     : ["binance-spot", "coinbase-spot", "okx-spot", "bybit-spot", "bitget-spot"];
-  if (selection !== "all-perps" && selection !== "all-spot" && selection !== "all-forex") return [selection];
+  if (selection !== "all-perps" && selection !== "all-spot") return [selection];
   return venues.filter((venue) => venueSupports(venue, symbol, marketType));
 }

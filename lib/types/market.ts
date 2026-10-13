@@ -14,10 +14,8 @@ export type Venue =
   | "hyperliquid"
   | "deribit"
   | "coinbase-spot"
-  | "massive-forex"
-  | "finnhub-forex"
-  | "mt5-forex";
-export type VenueSelection = Venue | "all-perps" | "all-spot" | "all-forex";
+  | "finnhub-forex";
+export type VenueSelection = Venue | "all-perps" | "all-spot";
 
 export type MarketType = "spot" | "perpetual" | "forex";
 export type TradeSide = "buy" | "sell";

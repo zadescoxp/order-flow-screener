@@ -9,11 +9,7 @@ import type {
   OrderBookLevel,
   Venue,
 } from "@/lib/types/market";
-import {
-  FinnhubForexAdapter,
-  MT5ForexAdapter,
-  MassiveForexAdapter,
-} from "./forex";
+import { FinnhubForexAdapter } from "./forex";
 
 // ─── Helpers ─────────────────────────────────────────────────
 function emitBook(
@@ -724,9 +720,7 @@ export class DeribitAdapter extends BaseExchangeAdapter {
 // ============================================================
 export function createAdapter(venue: Venue, symbol: string): BaseExchangeAdapter | null {
   switch (venue) {
-    case "massive-forex": return new MassiveForexAdapter(symbol);
     case "finnhub-forex": return new FinnhubForexAdapter(symbol);
-    case "mt5-forex": return new MT5ForexAdapter(symbol);
     case "binance-futures": {
       const { BinanceFuturesAdapter } = require("./binanceFutures");
       return new BinanceFuturesAdapter(symbol) as BaseExchangeAdapter;

@@ -11,7 +11,6 @@ export interface VenueConfig {
 }
 
 const forexSymbol = (symbol: string) => symbol.replace("/", "_").toUpperCase();
-const massiveSymbol = (symbol: string) => symbol.replace("/", "-").replace("_", "-").toUpperCase();
 const finnhubSymbol = (symbol: string) => `OANDA:${forexSymbol(symbol)}`;
 
 export const VENUE_CONFIG: Record<Venue, VenueConfig | undefined> = {
@@ -26,26 +25,12 @@ export const VENUE_CONFIG: Record<Venue, VenueConfig | undefined> = {
   hyperliquid: undefined,
   deribit: undefined,
   "coinbase-spot": undefined,
-  "massive-forex": {
-    venue: "massive-forex",
-    assetClass: "forex",
-    marketType: "forex",
-    websocketUrl: "wss://socket.massive.com/forex",
-    formatSymbol: massiveSymbol,
-  },
   "finnhub-forex": {
     venue: "finnhub-forex",
     assetClass: "forex",
     marketType: "forex",
     websocketUrl: "wss://ws.finnhub.io",
     formatSymbol: finnhubSymbol,
-  },
-  "mt5-forex": {
-    venue: "mt5-forex",
-    assetClass: "forex",
-    marketType: "forex",
-    websocketUrl: process.env.NEXT_PUBLIC_MT5_WS_URL ?? "ws://127.0.0.1:8765",
-    formatSymbol: (symbol) => symbol.replace(/[/_]/g, "").toUpperCase(),
   },
 };
 
