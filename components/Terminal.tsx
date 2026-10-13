@@ -37,42 +37,17 @@ function SessionTerminal() {
   }, [theme]);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        width: "100vw",
-        overflow: "hidden",
-        background: "var(--bg-base)",
-      }}
-    >
+    <div className="terminal-shell">
       <GlobalTooltip />
       <TopBar />
-      <div style={{ padding: "3px 10px", background: "var(--bg-base)" }}>
+      <div className="status-strip">
         <ConnectionStatusBar />
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          flex: 1,
-          overflow: "hidden",
-          gap: "1px",
-          background: "var(--border-muted)",
-        }}
-      >
+      <div className="terminal-workspace">
         {/* ── LEFT: Volume Profile ── */}
         {panels.volumeProfile && (
-          <div style={{ 
-            width: 180, 
-            minWidth: 100, 
-            maxWidth: 400,
-            flexShrink: 0, 
-            resize: "horizontal", 
-            overflow: "hidden", 
-            background: "var(--bg-base)" 
-          }}>
+          <div className="workspace-left">
             <VolumeProfilePanel />
           </div>
         )}
@@ -82,32 +57,18 @@ function SessionTerminal() {
 
         {/* ── RIGHT: Trades Profile + OBI + Order Book ── */}
         {panels.orderBook && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              width: 240,
-              minWidth: 150,
-              flexShrink: 0,
-              gap: "1px",
-              background: "var(--border-muted)",
-              overflow: "hidden",
-              // We could add horizontal resize here, but native resize is bottom-right.
-              // To make it resizable, we can let the center flex: 1 take remaining space.
-              // We'll add resize: horizontal and scale it (it will expand rightwards, which is awkward, so we skip it for right pane or keep a fixed default).
-            }}
-          >
+          <div className="workspace-right">
             {panels.tradesProfile && (
-              <div style={{ height: "200px", minHeight: 100, resize: "vertical", flexShrink: 0, background: "var(--bg-base)", overflow: "hidden" }}>
+              <div className="workspace-right-section trades-section">
                 <TradesProfilePanel />
               </div>
             )}
             {panels.obi && (
-              <div style={{ height: "120px", minHeight: 60, resize: "vertical", flexShrink: 0, background: "var(--bg-base)", overflow: "hidden" }}>
+              <div className="workspace-right-section obi-section">
                 <OBIPanel />
               </div>
             )}
-            <div style={{ flex: 1, overflow: "hidden", background: "var(--bg-base)" }}>
+            <div className="workspace-orderbook">
               <OrderBookPanel />
             </div>
           </div>
@@ -126,17 +87,7 @@ function CenterColumn({ panels }: { panels: PanelVisibility }) {
   const marketType = useSessionStore((s) => s.marketType);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        flex: 1,
-        minWidth: 300,
-        overflow: "hidden",
-        background: "var(--bg-base)",
-        gap: "1px",
-      }}
-    >
+    <div className="workspace-center">
       <ChartHeader
         symbol={symbol}
         venue={venue}
@@ -145,46 +96,20 @@ function CenterColumn({ panels }: { panels: PanelVisibility }) {
         ticker={ticker}
       />
 
-      <div
-        className="panel"
-        style={{
-          flex: 1,
-          border: "none",
-          borderBottom: "1px solid var(--border)",
-          overflow: "hidden",
-        }}
-      >
+      <div className="chart-card">
         <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
           <FootprintChartWrapper />
         </div>
       </div>
 
       {panels.volatility && (
-        <div
-          style={{
-            height: 140,
-            minHeight: 100,
-            resize: "vertical",
-            flexShrink: 0,
-            background: "var(--bg-base)",
-            overflow: "hidden"
-          }}
-        >
+        <div className="workspace-bottom-panel">
           <VolatilityPanel />
         </div>
       )}
 
       {panels.depthOfMarket && (
-        <div
-          style={{
-            height: 140,
-            minHeight: 100,
-            resize: "vertical",
-            flexShrink: 0,
-            background: "var(--bg-base)",
-            overflow: "hidden"
-          }}
-        >
+        <div className="workspace-bottom-panel">
           <DepthOfMarket />
         </div>
       )}
