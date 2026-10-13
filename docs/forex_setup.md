@@ -9,18 +9,18 @@ its quote stream.
 
 | Provider | Venue | Environment | Symbol format |
 | --- | --- | --- | --- |
-| OANDA v20 | OANDA | `NEXT_PUBLIC_OANDA_API_TOKEN`, `NEXT_PUBLIC_OANDA_ACCOUNT_ID` | `EUR/USD` |
-| Polygon.io | Polygon | `NEXT_PUBLIC_POLYGON_API_KEY` | `EUR/USD` |
+| Massive.com | Massive | `NEXT_PUBLIC_MASSIVE_API_KEY` | `EUR/USD` |
 | Finnhub | Finnhub | `NEXT_PUBLIC_FINNHUB_API_KEY` | `EUR/USD` |
 | MT5 bridge | MT5 bridge | optional `NEXT_PUBLIC_MT5_WS_URL` | `EUR/USD` |
+
+The browser streams are `wss://socket.massive.com/forex`,
+`wss://ws.finnhub.io?token=...`, and the local MT5 bridge URL respectively.
 
 Copy the required variables into `.env.local` before starting Next.js:
 
 ```bash
-NEXT_PUBLIC_POLYGON_API_KEY=...
+NEXT_PUBLIC_MASSIVE_API_KEY=...
 NEXT_PUBLIC_FINNHUB_API_KEY=...
-NEXT_PUBLIC_OANDA_API_TOKEN=...
-NEXT_PUBLIC_OANDA_ACCOUNT_ID=...
 NEXT_PUBLIC_MT5_WS_URL=ws://127.0.0.1:8765
 ```
 
