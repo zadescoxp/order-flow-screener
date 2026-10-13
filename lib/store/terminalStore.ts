@@ -23,6 +23,7 @@ import type {
   MarketTicker,
 } from "@/lib/types/market";
 import { RingBuffer } from "@/lib/session/RingBuffer";
+import { isForexVenue } from "@/lib/config/venues";
 
 // ----------------------------------------------------------
 // Terminal Settings
@@ -208,16 +209,19 @@ export const createTerminalStore = () => {
 
     setMarketType: (marketType) =>
       set((s) => {
-        const isValidVenue = marketType === "perpetual" 
+        const isValidVenue = marketType === "forex"
+          ? isForexVenue(s.venue as Venue)
+          : marketType === "perpetual"
           ? s.venue.includes("futures") || s.venue === "hyperliquid" || s.venue === "deribit"
           : s.venue.includes("spot");
         const newVenue = isValidVenue 
           ? s.venue 
-          : (marketType === "perpetual" ? "bybit-futures" : "bybit-spot");
+          : (marketType === "forex" ? "finnhub-forex" : marketType === "perpetual" ? "bybit-futures" : "bybit-spot");
         return {
           marketType,
-          venue: newVenue as Venue,
+          venue: newVenue as VenueSelection,
           selectedVenues: [newVenue as Venue],
+          tickSize: marketType === "forex" ? 0.00001 : s.tickSize,
           ...INITIAL_MARKET,
         };
       }),

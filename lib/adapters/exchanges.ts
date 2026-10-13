@@ -9,6 +9,7 @@ import type {
   OrderBookLevel,
   Venue,
 } from "@/lib/types/market";
+import { FinnhubForexAdapter } from "./forex";
 
 // ─── Helpers ─────────────────────────────────────────────────
 function emitBook(
@@ -719,6 +720,7 @@ export class DeribitAdapter extends BaseExchangeAdapter {
 // ============================================================
 export function createAdapter(venue: Venue, symbol: string): BaseExchangeAdapter | null {
   switch (venue) {
+    case "finnhub-forex": return new FinnhubForexAdapter(symbol);
     case "binance-futures": {
       const { BinanceFuturesAdapter } = require("./binanceFutures");
       return new BinanceFuturesAdapter(symbol) as BaseExchangeAdapter;

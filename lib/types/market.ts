@@ -13,10 +13,11 @@ export type Venue =
   | "bitget-spot"
   | "hyperliquid"
   | "deribit"
-  | "coinbase-spot";
+  | "coinbase-spot"
+  | "finnhub-forex";
 export type VenueSelection = Venue | "all-perps" | "all-spot";
 
-export type MarketType = "spot" | "perpetual";
+export type MarketType = "spot" | "perpetual" | "forex";
 export type TradeSide = "buy" | "sell";
 export type ConnectionStatus = "connecting" | "live" | "offline" | "error" | "stale";
 
@@ -188,6 +189,7 @@ export interface VenueConnection {
   latencyMs?: number;
   reconnectAttempts: number;
   error?: string;
+  stateFlag?: string;
 }
 
 // ----------------------------------------------------------
