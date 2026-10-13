@@ -216,12 +216,12 @@ export const createTerminalStore = () => {
           : s.venue.includes("spot");
         const newVenue = isValidVenue 
           ? s.venue 
-          : (marketType === "forex" ? "oanda-forex" : marketType === "perpetual" ? "bybit-futures" : "bybit-spot");
+          : (marketType === "forex" ? "massive-forex" : marketType === "perpetual" ? "bybit-futures" : "bybit-spot");
         return {
           marketType,
           venue: newVenue as VenueSelection,
           selectedVenues: newVenue === "all-forex"
-            ? ["oanda-forex", "polygon-forex", "finnhub-forex", "mt5-forex"]
+            ? ["massive-forex", "finnhub-forex", "mt5-forex"]
             : [newVenue as Venue],
           tickSize: marketType === "forex" ? 0.00001 : s.tickSize,
           ...INITIAL_MARKET,

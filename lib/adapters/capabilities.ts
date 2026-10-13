@@ -9,7 +9,7 @@ const VENUE_SYMBOLS: Partial<Record<Venue, readonly string[]>> = {
   "coinbase-spot": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
 };
 
-const FOREX_VENUES: Venue[] = ["oanda-forex", "polygon-forex", "finnhub-forex", "mt5-forex"];
+const FOREX_VENUES: Venue[] = ["massive-forex", "finnhub-forex", "mt5-forex"];
 
 export function venueSupports(
   venue: Venue,

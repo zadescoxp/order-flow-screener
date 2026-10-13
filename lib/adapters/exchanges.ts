@@ -12,8 +12,7 @@ import type {
 import {
   FinnhubForexAdapter,
   MT5ForexAdapter,
-  OandaForexAdapter,
-  PolygonForexAdapter,
+  MassiveForexAdapter,
 } from "./forex";
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -725,8 +724,7 @@ export class DeribitAdapter extends BaseExchangeAdapter {
 // ============================================================
 export function createAdapter(venue: Venue, symbol: string): BaseExchangeAdapter | null {
   switch (venue) {
-    case "oanda-forex": return new OandaForexAdapter(symbol);
-    case "polygon-forex": return new PolygonForexAdapter(symbol);
+    case "massive-forex": return new MassiveForexAdapter(symbol);
     case "finnhub-forex": return new FinnhubForexAdapter(symbol);
     case "mt5-forex": return new MT5ForexAdapter(symbol);
     case "binance-futures": {

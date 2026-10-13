@@ -11,7 +11,7 @@ export interface VenueConfig {
 }
 
 const forexSymbol = (symbol: string) => symbol.replace("/", "_").toUpperCase();
-const polygonSymbol = (symbol: string) => `C:${symbol.replace("/", "-").replace("_", "-").toUpperCase()}`;
+const massiveSymbol = (symbol: string) => `C:${symbol.replace("/", "-").replace("_", "-").toUpperCase()}`;
 const finnhubSymbol = (symbol: string) => `OANDA:${forexSymbol(symbol)}`;
 
 export const VENUE_CONFIG: Record<Venue, VenueConfig | undefined> = {
@@ -26,19 +26,12 @@ export const VENUE_CONFIG: Record<Venue, VenueConfig | undefined> = {
   hyperliquid: undefined,
   deribit: undefined,
   "coinbase-spot": undefined,
-  "oanda-forex": {
-    venue: "oanda-forex",
+  "massive-forex": {
+    venue: "massive-forex",
     assetClass: "forex",
     marketType: "forex",
-    websocketUrl: "wss://stream-fxtrade.oanda.com/v3",
-    formatSymbol: forexSymbol,
-  },
-  "polygon-forex": {
-    venue: "polygon-forex",
-    assetClass: "forex",
-    marketType: "forex",
-    websocketUrl: "wss://socket.polygon.io/forex",
-    formatSymbol: polygonSymbol,
+    websocketUrl: "wss://socket.massive.com/forex",
+    formatSymbol: massiveSymbol,
   },
   "finnhub-forex": {
     venue: "finnhub-forex",

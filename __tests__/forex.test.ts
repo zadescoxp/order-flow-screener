@@ -9,11 +9,10 @@ describe("Forex market support", () => {
   });
 
   it("supports the configured symbols and all Forex venues", () => {
-    expect(venueSupports("polygon-forex", "EUR/USD", "forex")).toBe(true);
+    expect(venueSupports("massive-forex", "EUR/USD", "forex")).toBe(true);
     expect(venueSupports("finnhub-forex", "BTCUSDT", "forex")).toBe(false);
     expect(venuesForSelection("all-forex", "forex", "GBP/USD")).toEqual([
-      "oanda-forex",
-      "polygon-forex",
+      "massive-forex",
       "finnhub-forex",
       "mt5-forex",
     ]);
