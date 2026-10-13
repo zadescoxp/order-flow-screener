@@ -11,7 +11,7 @@ export interface VenueConfig {
 }
 
 const forexSymbol = (symbol: string) => symbol.replace("/", "_").toUpperCase();
-const massiveSymbol = (symbol: string) => `C:${symbol.replace("/", "-").replace("_", "-").toUpperCase()}`;
+const massiveSymbol = (symbol: string) => symbol.replace("/", "-").replace("_", "-").toUpperCase();
 const finnhubSymbol = (symbol: string) => `OANDA:${forexSymbol(symbol)}`;
 
 export const VENUE_CONFIG: Record<Venue, VenueConfig | undefined> = {
