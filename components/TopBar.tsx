@@ -3,6 +3,7 @@
 import React from "react";
 import { useSessionStore } from "@/lib/session/SessionContext";
 import type { Venue, VenueSelection, Timeframe, MarketType, ToolProfile } from "@/lib/types/market";
+import { FOREX_SYMBOLS } from "@/lib/config/venues";
 import type { Theme } from "@/lib/theme";
 import { venueSupports } from "@/lib/adapters/capabilities";
 import { useUIStore } from "@/lib/store/uiStore";
@@ -20,6 +21,7 @@ const THEMES: { value: Theme; label: string }[] = [
 // ─── Asset options ───────────────────────────────────────────
 const ASSETS_PERP = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT", "LINKUSDT", "ARBUSDT", "OPUSDT"];
 const ASSETS_SPOT = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
+const ASSETS_FOREX = [...FOREX_SYMBOLS];
 
 const VENUES_PERP: { value: Venue; label: string }[] = [
   { value: "binance-futures", label: "Binance" },
@@ -36,6 +38,12 @@ const VENUES_SPOT: { value: Venue; label: string }[] = [
   { value: "okx-spot", label: "OKX" },
   { value: "bybit-spot", label: "Bybit" },
   { value: "bitget-spot", label: "Bitget" },
+];
+const VENUES_FOREX: { value: Venue; label: string }[] = [
+  { value: "oanda-forex", label: "OANDA" },
+  { value: "polygon-forex", label: "Polygon" },
+  { value: "finnhub-forex", label: "Finnhub" },
+  { value: "mt5-forex", label: "MT5 bridge" },
 ];
 
 const TIMEFRAMES: Timeframe[] = ["1m", "5m", "15m", "30m", "1h", "4h"];
@@ -54,7 +62,7 @@ function ConnectionStatus() {
   const selectedVenues = useSessionStore((s) => s.selectedVenues);
   const selectedConnections = selectedVenues.map((selected) => connections[selected]).filter(Boolean);
   const liveCount = selectedConnections.filter((connection) => connection.status === "live").length;
-  const status = venue === "all-perps" || venue === "all-spot"
+  const status = venue === "all-perps" || venue === "all-spot" || venue === "all-forex"
     ? liveCount === selectedVenues.length && selectedVenues.length > 0 ? "live" : "connecting"
     : connections[venue]?.status ?? "connecting";
   const conn = connections[venue];
@@ -72,13 +80,13 @@ function ConnectionStatus() {
             color: status === "live" ? "var(--buy)" : "var(--text-muted)",
           }}
         >
-          {status === "live"
-            ? venue === "all-perps" || venue === "all-spot"
+          {conn?.stateFlag ?? (status === "live"
+            ? venue === "all-perps" || venue === "all-spot" || venue === "all-forex"
               ? `${liveCount}/${selectedVenues.length} LIVE`
               : "LIVE"
             : status === "connecting"
             ? "CONNECTING"
-            : status.toUpperCase()}
+            : status.toUpperCase())}
         </span>
       </div>
       {ticker && (
@@ -111,9 +119,11 @@ export default function TopBar() {
   const heatmapEnabled = useUIStore((s) => s.heatmap.tradedVolume);
   const setHeatmapVisible = useUIStore((s) => s.setHeatmapVisible);
 
-  const assets = marketType === "perpetual" ? ASSETS_PERP : ASSETS_SPOT;
-  const venues = marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
-  const aggregateValue: VenueSelection = marketType === "perpetual" ? "all-perps" : "all-spot";
+  const isForex = marketType === "forex";
+  const assets = isForex ? ASSETS_FOREX : marketType === "perpetual" ? ASSETS_PERP : ASSETS_SPOT;
+  const venues = isForex ? VENUES_FOREX : marketType === "perpetual" ? VENUES_PERP : VENUES_SPOT;
+  const aggregateValue: VenueSelection = isForex ? "all-forex" : marketType === "perpetual" ? "all-perps" : "all-spot";
+  const priceDigits = isForex ? 5 : 1;
 
   const changeStr =
     ticker
@@ -138,6 +148,25 @@ export default function TopBar() {
       </div>
 
       <div className="topbar-sep" />
+
+      {/* ── Asset class ── */}
+      <div className="select-wrap">
+        <select
+          className="terminal-select"
+          value={isForex ? "forex" : "crypto"}
+          onChange={(event) => {
+            const nextClass = event.target.value as "crypto" | "forex";
+            setMarketType(nextClass === "forex" ? "forex" : "perpetual");
+            setSymbol(nextClass === "forex" ? "EUR/USD" : "BTCUSDT");
+          }}
+          id="asset-class-selector"
+          aria-label="Asset class"
+        >
+          <option value="crypto">Crypto</option>
+          <option value="forex">Forex</option>
+        </select>
+        <span className="select-arrow">▾</span>
+      </div>
 
       {/* ── Asset ── */}
       <div className="select-wrap">
@@ -168,11 +197,11 @@ export default function TopBar() {
           }}
         >
           <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
-            {ticker.price.toLocaleString("en-US", { minimumFractionDigits: 1 })}
+            {ticker.price.toLocaleString("en-US", { minimumFractionDigits: priceDigits, maximumFractionDigits: priceDigits })}
           </span>
           <span style={{ fontSize: 10, color: changeColor }}>{changeStr}</span>
           <span style={{ fontSize: 9, color: "var(--text-muted)" }}>
-            O {ticker.open.toFixed(1)} H {ticker.high.toFixed(1)} L {ticker.low.toFixed(1)}
+            O {ticker.open.toFixed(priceDigits)} H {ticker.high.toFixed(priceDigits)} L {ticker.low.toFixed(priceDigits)}
           </span>
         </div>
       )}
@@ -203,8 +232,9 @@ export default function TopBar() {
           onChange={(e) => setMarketType(e.target.value as MarketType)}
           id="market-type-selector"
         >
-          <option value="perpetual">Perpetual</option>
-          <option value="spot">Spot</option>
+          {!isForex && <option value="perpetual">Perpetual</option>}
+          {!isForex && <option value="spot">Spot</option>}
+          {isForex && <option value="forex">Forex</option>}
         </select>
         <span className="select-arrow">▾</span>
       </div>
@@ -230,7 +260,7 @@ export default function TopBar() {
           id="venue-selector"
         >
           <option value={aggregateValue}>
-            {marketType === "perpetual" ? "All perps" : "All spot"}
+            {isForex ? "All Forex" : marketType === "perpetual" ? "All perps" : "All spot"}
           </option>
           {venues.map((v) => (
             <option
@@ -245,7 +275,7 @@ export default function TopBar() {
         <span className="select-arrow">▾</span>
       </div>
 
-      {(venue === "all-perps" || venue === "all-spot") && (
+      {(venue === "all-perps" || venue === "all-spot" || venue === "all-forex") && (
         <div style={{ display: "flex", gap: 2 }}>
           {venues.map((v) => {
             const enabled = selectedVenues.includes(v.value);
