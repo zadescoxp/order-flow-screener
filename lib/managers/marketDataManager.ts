@@ -1,7 +1,7 @@
 // ============================================================
 // MARKET DATA MANAGER
-// Manages adapter lifecycle, feeds data into order-flow engine
-// and dispatches normalized events to the Zustand store
+// Manages adapter lifecycle, feeds data into the order-flow engine
+// and dispatches batched, normalized events to the session store.
 // ============================================================
 
 "use client";
@@ -17,8 +17,13 @@ import {
   applyZScores,
   computeVolumeProfile,
   computeOBI,
-  computeZScore,
 } from "@/lib/engine/orderFlowEngine";
+import {
+  applyTradeToSession,
+  createFlowBar,
+  createSessionStats,
+  resolveTickSize,
+} from "@/lib/engine/analytics";
 import type { MarketDataBatch, TerminalStore } from "@/lib/store/terminalStore";
 import type { StoreApi } from "zustand";
 import type {
@@ -31,8 +36,15 @@ import type {
   FootprintCandle,
   FootprintLevel,
   OBISnapshot,
-  ZScorePoint,
+  FlowBar,
+  MarketTicker,
+  SessionStats,
+  VenueConnection,
 } from "@/lib/types/market";
+
+const FLOW_BAR_MS = 1000;
+const MAX_GAP_FILL_BARS = 120;
+const FLUSH_INTERVAL_MS = 50;
 
 export class MarketDataManager {
   private readonly store: StoreApi<TerminalStore>;
@@ -41,7 +53,7 @@ export class MarketDataManager {
   private listeners = new Map<Venue, {
     tradeListener: (trade: NormalizedTrade) => void;
     bookListener: (book: NormalizedOrderBook) => void;
-    statusListener: (conn: Parameters<TerminalStore["updateConnection"]>[0]) => void;
+    statusListener: (conn: VenueConnection) => void;
   }>();
   private currentSymbol = "";
   private currentVenue: VenueSelection | null = null;
@@ -49,33 +61,30 @@ export class MarketDataManager {
   private currentMarketType: MarketType = "perpetual";
   private currentTimeframe: Timeframe = "5m";
   private currentTickSize = 10;
+  private tickResolved = false;
   private currentImbalanceThreshold = 3;
 
   // Working candle state
   private currentCandleRef: FootprintCandle | null = null;
-  private allLevels: FootprintLevel[] = []; // rolling window for z-score
+  private allLevels: FootprintLevel[] = []; // rolling window for level z-score
+  private cumulativeDelta = 0; // delta of all finalized candles
 
-  // OBI rolling window
-  private bidDepthWindow: number[] = [];
-  private askDepthWindow: number[] = [];
+  // Flow bars & session
+  private liveBar: FlowBar | null = null;
+  private sessionCvd = 0;
+  private session: SessionStats | null = null;
 
-  // Z-score rolling volume window
-  private volumeWindow: number[] = [];
-  private previousTradePrice: number | null = null;
-
-  // Cumulative delta
-  private cumulativeDelta = 0;
   private paused = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingTrades: NormalizedTrade[] = [];
   private pendingOrderBook: NormalizedOrderBook | null = null;
   private pendingAggregatedBook: ReturnType<typeof aggregateBooks> = null;
-  private pendingConnections = new Map<Venue, Parameters<TerminalStore["updateConnection"]>[0]>();
+  private pendingConnections = new Map<Venue, VenueConnection>();
   private pendingCandle: FootprintCandle | null = null;
-  private pendingVolumeProfile: ReturnType<typeof computeVolumeProfile> | null = null;
-  private pendingTicker: Parameters<TerminalStore["updateTicker"]>[0] | null = null;
+  private profileDirty = false;
+  private pendingTicker: MarketTicker | null = null;
   private pendingOBI: OBISnapshot | null = null;
-  private pendingZScores: ZScorePoint[] = [];
+  private pendingFlowBars: FlowBar[] = [];
 
   constructor(store: StoreApi<TerminalStore>) {
     this.store = store;
@@ -121,6 +130,7 @@ export class MarketDataManager {
     this.currentMarketType = marketType;
     this.currentTimeframe = timeframe;
     this.currentTickSize = tickSize;
+    this.tickResolved = false;
     this.currentImbalanceThreshold = imbalanceThreshold;
 
     for (const selectedVenue of venues) {
@@ -128,7 +138,7 @@ export class MarketDataManager {
       if (!adapter) continue;
       const tradeListener = (trade: NormalizedTrade) => this.onTrade(trade);
       const bookListener = (book: NormalizedOrderBook) => this.onOrderBook(book);
-      const statusListener = (conn: Parameters<TerminalStore["updateConnection"]>[0]) => {
+      const statusListener = (conn: VenueConnection) => {
         this.pendingConnections.set(conn.venue, conn);
         this.scheduleFlush();
       };
@@ -147,10 +157,10 @@ export class MarketDataManager {
     this.pendingOrderBook = null;
     this.pendingAggregatedBook = null;
     this.pendingCandle = null;
-    this.pendingVolumeProfile = null;
+    this.profileDirty = false;
     this.pendingTicker = null;
     this.pendingOBI = null;
-    this.pendingZScores = [];
+    this.pendingFlowBars = [];
     this.pendingConnections.clear();
     for (const [venue, adapter] of this.adapters) {
       const listeners = this.listeners.get(venue);
@@ -166,103 +176,119 @@ export class MarketDataManager {
     this.books.clear();
     this.currentCandleRef = null;
     this.allLevels = [];
-    this.volumeWindow = [];
-    this.previousTradePrice = null;
     this.cumulativeDelta = 0;
+    this.liveBar = null;
+    this.sessionCvd = 0;
+    this.session = null;
     this.store.getState().resetMarketData();
   }
 
-  private toOKXSymbol(symbol: string, type: "perpetual" | "spot"): string {
-    const base = symbol.replace("USDT", "").replace("USD", "");
-    if (type === "perpetual") return `${base}-USDT-SWAP`;
-    return `${base}-USDT`;
+  private get primaryVenue(): Venue | undefined {
+    return this.currentSelectedVenues[0];
   }
 
   private onTrade(trade: NormalizedTrade): void {
     if (this.paused) return;
+    if (!Number.isFinite(trade.price) || trade.price <= 0) return;
     const store = this.store.getState();
+
+    // Footprint rows are sized from the instrument's price on the first print.
+    if (!this.tickResolved) {
+      this.tickResolved = true;
+      this.currentTickSize = resolveTickSize(trade.price, this.currentMarketType);
+      if (store.tickSize !== this.currentTickSize) store.setTickSize(this.currentTickSize);
+    }
 
     const candleOpenTime = getCandleOpenTime(trade.timestamp, this.currentTimeframe);
 
-    // Check if we need a new candle
     if (!this.currentCandleRef || this.currentCandleRef.openTime !== candleOpenTime) {
       if (this.currentCandleRef) {
-        // Finalize current candle
         const finalized = { ...this.currentCandleRef, complete: true };
         this.cumulativeDelta += finalized.delta;
         finalized.cumulativeDelta = this.cumulativeDelta;
         store.finalizeCandle(finalized);
 
-        // Collect all levels for z-score window
-        for (const level of finalized.levels.values()) {
-          this.allLevels.push(level);
-        }
-        // Keep rolling window
-        if (this.allLevels.length > 5000) {
-          this.allLevels = this.allLevels.slice(-3000);
-        }
-
-        // Volume profile
-        const allCandles = [...store.candles];
-        if (allCandles.length > 0) {
-          this.pendingVolumeProfile = computeVolumeProfile(allCandles);
-        }
+        for (const level of finalized.levels.values()) this.allLevels.push(level);
+        if (this.allLevels.length > 5000) this.allLevels = this.allLevels.slice(-3000);
       }
-
       this.currentCandleRef = createEmptyCandle(candleOpenTime, this.currentTimeframe);
     }
 
-    // Apply trade to current candle
     this.currentCandleRef = applyTradeToCandle(
       this.currentCandleRef,
       trade,
       this.currentTickSize,
       this.currentImbalanceThreshold
     );
+    this.currentCandleRef.cumulativeDelta = this.cumulativeDelta + this.currentCandleRef.delta;
 
-    // Apply z-scores
-    if (this.allLevels.length > 1) {
-      applyZScores(this.currentCandleRef, this.allLevels);
-    }
+    if (this.allLevels.length > 1) applyZScores(this.currentCandleRef, this.allLevels);
 
-    // Update store with current candle
+    // Session statistics & VWAP
+    if (!this.session) this.session = createSessionStats(trade.timestamp, trade.price);
+    applyTradeToSession(
+      this.session,
+      trade.price,
+      trade.quantity,
+      trade.side,
+      Math.max(0, trade.localTimestamp - trade.timestamp)
+    );
+    this.currentCandleRef.vwap = this.session.vwap;
+    this.currentCandleRef.vwapStd = this.session.vwapStd;
+
+    this.updateFlowBar(trade);
+
     this.pendingCandle = { ...this.currentCandleRef };
-    this.pendingVolumeProfile = computeVolumeProfile([
-      ...store.candles,
-      this.currentCandleRef,
-    ]);
+    this.profileDirty = true;
 
-    // Update ticker
+    const candle = this.currentCandleRef;
     this.pendingTicker = {
       venue: trade.venue,
       symbol: trade.symbol,
       price: trade.price,
-      open: this.currentCandleRef.open,
-      high: this.currentCandleRef.high,
-      low: this.currentCandleRef.low,
-      change: trade.price - this.currentCandleRef.open,
-      changePct: ((trade.price - this.currentCandleRef.open) / this.currentCandleRef.open) * 100,
-      volume: this.currentCandleRef.volume,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      change: trade.price - candle.open,
+      changePct: candle.open ? ((trade.price - candle.open) / candle.open) * 100 : 0,
+      volume: candle.volume,
       timestamp: trade.timestamp,
     };
 
-    // Z-score on volume
-    const movement = this.previousTradePrice === null
-      ? 0
-      : Math.abs(trade.price - this.previousTradePrice) / this.currentTickSize;
-    this.previousTradePrice = trade.price;
-    const volatilityInput = this.currentMarketType === "forex" ? movement : trade.quantity;
-    this.volumeWindow.push(volatilityInput);
-    if (this.volumeWindow.length > 200) this.volumeWindow.shift();
-    const zScore = computeZScore(this.volumeWindow, volatilityInput);
-    const zPoint: ZScorePoint = {
-      timestamp: trade.timestamp,
-      value: zScore,
-      volume: trade.quantity,
-    };
-    this.pendingZScores.push(zPoint);
     this.pendingTrades.push(trade);
     this.scheduleFlush();
+  }
+
+  /** Accumulate the trade into fixed 1-second flow bars, filling empty seconds. */
+  private updateFlowBar(trade: NormalizedTrade): void {
+    const bucket = Math.floor(trade.timestamp / FLOW_BAR_MS) * FLOW_BAR_MS;
+    if (this.liveBar && bucket < this.liveBar.time) {
+      // Late print from a slower venue — fold it into the current bar.
+    } else if (!this.liveBar || bucket > this.liveBar.time) {
+      if (this.liveBar) {
+        const previous = this.liveBar;
+        this.pendingFlowBars.push(previous);
+        const missing = Math.min(MAX_GAP_FILL_BARS, (bucket - previous.time) / FLOW_BAR_MS - 1);
+        for (let i = 1; i <= missing; i++) {
+          this.pendingFlowBars.push(
+            createFlowBar(previous.time + i * FLOW_BAR_MS, previous.close, previous.cvd)
+          );
+        }
+      }
+      this.liveBar = createFlowBar(bucket, trade.price, this.sessionCvd);
+    }
+
+    const bar = this.liveBar!;
+    const signed = trade.side === "buy" ? trade.quantity : -trade.quantity;
+    this.sessionCvd += signed;
+    bar.high = Math.max(bar.high, trade.price);
+    bar.low = Math.min(bar.low, trade.price);
+    bar.close = trade.price;
+    bar.volume += trade.quantity;
+    if (trade.side === "buy") bar.buyVolume += trade.quantity;
+    else bar.sellVolume += trade.quantity;
+    bar.trades += 1;
+    bar.cvd = this.sessionCvd;
   }
 
   private onOrderBook(book: NormalizedOrderBook): void {
@@ -271,20 +297,20 @@ export class MarketDataManager {
     this.books.set(book.venue, book);
     const aggregate = aggregateBooks(this.books);
     if (!aggregate) return;
-    const { bidVolume: bidVol, askVolume: askVol } = computeBandObi(this.books, aggregate);
-    const obi = computeOBI(bidVol, askVol);
+    const { bidVolume, askVolume } = computeBandObi(this.books, aggregate);
 
-    const snap: OBISnapshot = {
+    this.pendingOBI = {
       timestamp: book.timestamp,
-      value: obi,
-      bidVolume: bidVol,
-      askVolume: askVol,
+      value: computeOBI(bidVolume, askVolume),
+      bidVolume,
+      askVolume,
     };
-    this.pendingOrderBook = {
-      ...book,
-    };
+    // The single-venue book always tracks the primary venue so it doesn't
+    // jump between exchanges when several are subscribed.
+    if (book.venue === this.primaryVenue || !this.primaryVenue) {
+      this.pendingOrderBook = book;
+    }
     this.pendingAggregatedBook = aggregate;
-    this.pendingOBI = snap;
     this.scheduleFlush();
   }
 
@@ -302,15 +328,21 @@ export class MarketDataManager {
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
       const store = this.store.getState();
+      const volumeProfile =
+        this.profileDirty && this.currentCandleRef
+          ? computeVolumeProfile([...store.candles, this.currentCandleRef], store.valueAreaPct)
+          : null;
       const batch: MarketDataBatch = {
         trades: this.pendingTrades,
         orderBook: this.pendingOrderBook,
         aggregatedBook: this.pendingAggregatedBook,
         candle: this.pendingCandle,
-        volumeProfile: this.pendingVolumeProfile,
+        volumeProfile,
         ticker: this.pendingTicker,
         obi: this.pendingOBI,
-        zScores: this.pendingZScores,
+        flowBars: this.pendingFlowBars,
+        liveBar: this.liveBar ? { ...this.liveBar } : null,
+        session: this.session ? { ...this.session } : null,
         connections: [...this.pendingConnections.values()],
       };
       store.applyMarketDataBatch(batch);
@@ -318,11 +350,11 @@ export class MarketDataManager {
       this.pendingOrderBook = null;
       this.pendingAggregatedBook = null;
       this.pendingCandle = null;
-      this.pendingVolumeProfile = null;
+      this.profileDirty = false;
       this.pendingTicker = null;
       this.pendingOBI = null;
-      this.pendingZScores = [];
+      this.pendingFlowBars = [];
       this.pendingConnections.clear();
-    }, 50);
+    }, FLUSH_INTERVAL_MS);
   }
 }
