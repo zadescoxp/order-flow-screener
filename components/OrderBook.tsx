@@ -1,245 +1,207 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback } from "react";
-import { useSessionStore, useSessionStoreApi } from "@/lib/session/SessionContext";
-import type { NormalizedOrderBook } from "@/lib/types/market";
-import { formatPrice as formatTickPrice } from "@/lib/engine/orderFlowEngine";
+import React, { useMemo, useState } from "react";
+import { useSessionStore } from "@/lib/session/SessionContext";
+import { formatCompact, formatPriceValue, inferDecimals, priceDecimals, VENUE_LABEL } from "@/lib/format";
+import { Icon } from "@/components/ui/Icons";
+import { Panel, Segmented } from "@/components/ui/Primitives";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
+import type { OrderBookLevel } from "@/lib/types/market";
 
-// ─── Order Book Panel ────────────────────────────────────────────
-// Shows live bid/ask levels with cumulative size bars.
-// Supports: single venue, aggregated, compact modes.
+// ─── Order Book Ladder ───────────────────────────────────────────
+// Price ladder with per-level size bars, cumulative depth shading,
+// liquidity-wall highlighting and a top-of-book imbalance meter.
 
-function formatSize(v: number): string {
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
-  if (v >= 1000) return `${(v / 1000).toFixed(2)}K`;
-  return v.toFixed(4);
+const LEVELS_PER_SIDE = 24;
+const GROUPS = [0, 1, 5, 25] as const; // multiples of the footprint tick; 0 = raw book
+type Group = (typeof GROUPS)[number];
+
+interface Row {
+  price: number;
+  size: number;
+  cum: number;
 }
 
-const MAX_LEVELS = 20;
+function groupLevels(levels: OrderBookLevel[], step: number, side: "bid" | "ask", decimals: number): Row[] {
+  const map = new Map<number, number>();
+  for (const level of levels) {
+    const key = step > 0
+      ? Number(((side === "ask" ? Math.ceil(level.price / step - 1e-9) : Math.floor(level.price / step + 1e-9)) * step).toFixed(decimals + 2))
+      : level.price;
+    map.set(key, (map.get(key) ?? 0) + level.size);
+  }
+  const rows = [...map.entries()]
+    .sort((a, b) => (side === "ask" ? a[0] - b[0] : b[0] - a[0]))
+    .slice(0, LEVELS_PER_SIDE);
+  let cum = 0;
+  return rows.map(([price, size]) => ({ price, size, cum: (cum += size) }));
+}
 
 export default function OrderBookPanel() {
   const orderBook = useSessionStore((s) => s.orderBook);
-  const orderBookMode = useSessionStore((s) => s.orderBookMode);
-  const setOrderBookMode = useSessionStore((s) => s.setOrderBookMode);
-  const ticker = useSessionStore((s) => s.ticker);
+  const aggregatedBook = useSessionStore((s) => s.aggregatedBook);
+  const mode = useSessionStore((s) => s.orderBookMode);
+  const setMode = useSessionStore((s) => s.setOrderBookMode);
+  const selectedVenues = useSessionStore((s) => s.selectedVenues);
+  const tickSize = useSessionStore((s) => s.tickSize);
   const marketType = useSessionStore((s) => s.marketType);
-  const sessionStore = useSessionStoreApi();
-  const displayBook = orderBookMode === "aggregated" && sessionStore.getState().aggregatedBook 
-    ? sessionStore.getState().aggregatedBook 
-    : orderBook;
+  const lastTrade = useSessionStore((s) => s.ticker);
+  const [group, setGroup] = useState<Group>(0);
 
-  if (!displayBook) {
-    return (
-      <div className="panel" style={{ height: "100%" }}>
-        <div className="panel-header">
-          <span className="panel-title">Order Book</span>
-          <ModeSelector mode={orderBookMode} setMode={setOrderBookMode} />
-        </div>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 10 }}>
-          Waiting for {orderBookMode} order book…
-        </div>
-      </div>
-    );
-  }
+  const multiVenue = selectedVenues.length > 1;
+  const book = mode === "aggregated" || mode === "compact" ? aggregatedBook ?? orderBook : orderBook ?? aggregatedBook;
+  const step = group === 0 ? 0 : tickSize * group;
+  const rawDecimals = useMemo(
+    () => (book ? inferDecimals([...book.bids.slice(0, 20), ...book.asks.slice(0, 20)].map((l) => l.price)) : 0),
+    [book]
+  );
+  const decimals = step ? priceDecimals(step, lastTrade?.price) : Math.max(rawDecimals, priceDecimals(tickSize));
 
-  // Grouping logic for Compact mode
-  const tickSize = sessionStore.getState().tickSize;
-  const priceDigits = marketType === "forex" ? 5 : undefined;
-  const groupFactor = orderBookMode === "compact" ? 10 : (orderBookMode === "aggregated" ? 5 : 1);
-  const effectiveTickSize = tickSize * groupFactor;
+  const view = useMemo(() => {
+    if (!book) return null;
+    const asks = groupLevels(book.asks, step, "ask", decimals);
+    const bids = groupLevels(book.bids, step, "bid", decimals);
+    const sizes = [...asks, ...bids].map((r) => r.size).sort((a, b) => a - b);
+    const median = sizes[Math.floor(sizes.length / 2)] || 0;
+    // A wall must be both far above the typical level and in the top decile.
+    const wallSize = Math.max(median * 4, sizes[Math.floor(sizes.length * 0.9)] ?? Infinity);
+    const maxSize = sizes[sizes.length - 1] || 1;
+    const maxCum = Math.max(asks[asks.length - 1]?.cum ?? 0, bids[bids.length - 1]?.cum ?? 0) || 1;
+    const bestBid = book.bids[0]?.price ?? 0;
+    const bestAsk = book.asks[0]?.price ?? 0;
+    const spread = bestAsk && bestBid ? bestAsk - bestBid : 0;
+    const mid = bestAsk && bestBid ? (bestAsk + bestBid) / 2 : bestAsk || bestBid;
+    const bidTotal = bids[bids.length - 1]?.cum ?? 0;
+    const askTotal = asks[asks.length - 1]?.cum ?? 0;
+    // Microprice: size-weighted mid that leans toward the thinner side.
+    const bidSize = book.bids[0]?.size ?? 0;
+    const askSize = book.asks[0]?.size ?? 0;
+    const micro = bidSize + askSize > 0 ? (bestAsk * bidSize + bestBid * askSize) / (bidSize + askSize) : mid;
+    return { asks, bids, median, wallSize, maxSize, maxCum, spread, mid, bidTotal, askTotal, micro };
+  }, [book, step, decimals]);
 
-  const groupLevels = (levels: {price: number, size: number}[], isAsk: boolean) => {
-    if (groupFactor === 1) return levels.slice(0, MAX_LEVELS);
-    const map = new Map<number, number>();
-    for (const l of levels) {
-      // For asks, we round up to the nearest effective tick. For bids, round down.
-      const rounded = isAsk 
-        ? Math.ceil(l.price / effectiveTickSize) * effectiveTickSize
-        : Math.floor(l.price / effectiveTickSize) * effectiveTickSize;
-      map.set(rounded, (map.get(rounded) || 0) + l.size);
-    }
-    const grouped = Array.from(map.entries()).map(([price, size]) => ({ price, size }));
-    if (isAsk) {
-      grouped.sort((a, b) => a.price - b.price);
-    } else {
-      grouped.sort((a, b) => b.price - a.price);
-    }
-    return grouped.slice(0, MAX_LEVELS);
-  };
+  const groupOptions = GROUPS.map((g) => ({
+    value: g,
+    label: g === 0 ? "Raw" : formatPriceValue(tickSize * g, priceDecimals(tickSize * g)),
+    title: g === 0 ? "Exchange price levels" : `Group levels into ${tickSize * g} buckets`,
+  }));
 
-  const asks = groupLevels(displayBook.asks, true);
-  const bids = groupLevels(displayBook.bids, false);
-
-  // Cumulative sizes
-  let cumAsk = 0;
-  const asksWithCum = [...asks].reverse().map((a) => {
-    cumAsk += a.size;
-    return { ...a, cum: cumAsk };
-  });
-  asksWithCum.reverse();
-  const maxCumAsk = cumAsk;
-
-  let cumBid = 0;
-  const bidsWithCum = bids.map((b) => {
-    cumBid += b.size;
-    return { ...b, cum: cumBid };
-  });
-  const maxCumBid = cumBid;
-
-  const midPrice = ticker?.price ?? displayBook.asks[0]?.price ?? 0;
-  const topAsk = displayBook.asks[0]?.price ?? 0;
-  const topBid = displayBook.bids[0]?.price ?? 0;
-  const spread = topAsk - topBid;
-  const spreadPct = topBid > 0 ? (spread / topBid) * 100 : 0;
+  const sourceLabel = book && "venue" in book ? VENUE_LABEL[book.venue] ?? book.venue : "Consolidated";
 
   return (
-    <div
-      className="panel orderbook-modern"
-      style={{ height: "100%", display: "flex", flexDirection: "column" }}
+    <Panel
+      title="Order Book" icon={<Icon.Book />}
+      subtitle={marketType === "forex" ? "quote proxy" : sourceLabel}
+      className="orderbook-panel"
+      actions={
+        <>
+          {multiVenue && (
+            <Segmented
+              size="xs"
+              value={mode === "single" ? "single" : "aggregated"}
+              onChange={(value) => setMode(value)}
+              options={[
+                { value: "aggregated", label: "Consolidated" },
+                { value: "single", label: VENUE_LABEL[selectedVenues[0]]?.split(" ")[0] ?? "Primary" },
+              ]}
+              ariaLabel="Book source"
+            />
+          )}
+          <Segmented size="xs" value={group} onChange={setGroup} options={groupOptions} ariaLabel="Price grouping" />
+        </>
+      }
+      footer={
+        view && (
+          <div className="book-imbalance" title="Resting size within the displayed levels">
+            <span className="tone-buy">{formatCompact(view.bidTotal)}</span>
+            <div className="imbalance-track">
+              <div
+                className="imbalance-bid"
+                style={{ width: `${(view.bidTotal / (view.bidTotal + view.askTotal || 1)) * 100}%` }}
+              />
+            </div>
+            <span className="tone-sell">{formatCompact(view.askTotal)}</span>
+            <strong>
+              {(((view.bidTotal - view.askTotal) / (view.bidTotal + view.askTotal || 1)) * 100).toFixed(0)}%
+            </strong>
+          </div>
+        )
+      }
     >
-      <div className="panel-header orderbook-header">
-        <div><span className="panel-title">Order Book</span><span className="orderbook-subtitle">DEPTH &amp; LIQUIDITY</span></div>
-        <ModeSelector mode={orderBookMode} setMode={setOrderBookMode} />
-      </div>
-
-      {/* Column headers */}
-      <div className="orderbook-columns"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
-          padding: "2px 8px",
-          fontSize: 9.5,
-          color: "var(--text-muted)",
-          borderBottom: "1px solid var(--border-muted)",
-          flexShrink: 0,
-        }}
-      >
-        <span>Price</span>
-        <span style={{ textAlign: "right" }}>Size</span>
-        <span style={{ textAlign: "right" }}>Total</span>
-      </div>
-
-      {/* Asks (reversed so highest ask is at top of list) */}
-      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-        <div className="orderbook-side asks-side">
-          <div className="orderbook-side-label"><span>ASKS</span><span className="side-percent sell">SELL PRESSURE</span></div>
-          {asksWithCum.map((ask) => (
-            <div 
-              className="ob-row" 
-              key={ask.price} 
-              style={{ position: "relative", cursor: "crosshair" }}
-              onMouseMove={(e) => {
-                showTooltip(
-                  `Ask Level: ${formatTickPrice(ask.price, tickSize)}`,
-                  `Size at Price: ${formatSize(ask.size)}\nCumulative Size: ${formatSize(ask.cum)}\n\nWhat this means: There are pending limit sell orders resting at this price. The cumulative size tells you the total amount of sellers blocking the price from moving up to this level.`,
-                  e
-                );
-              }}
-              onMouseLeave={hideTooltip}
-            >
-              {/* Depth bar */}
-              <div
-                className="ob-depth-bar ask"
-                style={{ width: `${(ask.cum / maxCumAsk) * 100}%`, opacity: 0.12 }}
-              />
-              <span style={{ color: "var(--sell)", fontWeight: 500 }}>
-                {formatTickPrice(ask.price, tickSize)}
+      {!view ? (
+        <div className="empty-state">Waiting for order book…</div>
+      ) : (
+        <div className="ladder">
+          <div className="ladder-head">
+            <span>Price</span>
+            <span>Size</span>
+            <span>Total</span>
+          </div>
+          <div className="ladder-side ladder-asks">
+            {[...view.asks].reverse().map((row) => (
+              <LadderRow key={`a${row.price}`} row={row} side="ask" view={view} decimals={decimals} />
+            ))}
+          </div>
+          <div className="ladder-spread">
+            <strong>{formatPriceValue(view.mid, decimals)}</strong>
+            {view.spread < 0 ? (
+              <span className="tone-warn" title="Consolidated best bid is above the best ask on another venue — an arbitrage gap between exchanges, not a tradeable spread on one book">
+                Crossed {formatPriceValue(-view.spread, rawDecimals)}
               </span>
-              <span style={{ textAlign: "right", color: "var(--text-secondary)" }}>
-                {formatSize(ask.size)}
+            ) : (
+              <span title="Bid-ask spread">
+                Spread {formatPriceValue(view.spread, rawDecimals)}
+                {view.mid ? ` · ${((view.spread / view.mid) * 10_000).toFixed(2)} bp` : ""}
               </span>
-              <span style={{ textAlign: "right", color: "var(--text-muted)" }}>
-                {formatSize(ask.cum)}
-              </span>
-            </div>
-          ))}
+            )}
+            <span title="Microprice: top-of-book size-weighted mid">μ {formatPriceValue(view.micro, Math.max(rawDecimals, decimals) + 1)}</span>
+          </div>
+          <div className="ladder-side ladder-bids">
+            {view.bids.map((row) => (
+              <LadderRow key={`b${row.price}`} row={row} side="bid" view={view} decimals={decimals} />
+            ))}
+          </div>
         </div>
-
-        {/* Mid price / spread */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "3px 8px",
-            background: "var(--bg-active)",
-            borderTop: "1px solid var(--border-muted)",
-            borderBottom: "1px solid var(--border-muted)",
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
-            {formatTickPrice(midPrice, tickSize)}
-          </span>
-          <span style={{ fontSize: 9.5, color: "var(--text-muted)" }}>
-            Spread {spread.toFixed(priceDigits ?? 1)} ({spreadPct.toFixed(3)}%)
-          </span>
-        </div>
-
-        {/* Bids */}
-        <div className="orderbook-side bids-side">
-          <div className="orderbook-side-label"><span>BIDS</span><span className="side-percent buy">BUY SUPPORT</span></div>
-          {bidsWithCum.map((bid) => (
-            <div 
-              className="ob-row" 
-              key={bid.price} 
-              style={{ position: "relative", cursor: "crosshair" }}
-              onMouseMove={(e) => {
-                showTooltip(
-                  `Bid Level: ${formatTickPrice(bid.price, tickSize)}`,
-                  `Size at Price: ${formatSize(bid.size)}\nCumulative Size: ${formatSize(bid.cum)}\n\nWhat this means: There are pending limit buy orders resting at this price. The cumulative size tells you the total amount of buyers supporting the price from dropping down to this level.`,
-                  e
-                );
-              }}
-              onMouseLeave={hideTooltip}
-            >
-              {/* Depth bar */}
-              <div
-                className="ob-depth-bar bid"
-                style={{ width: `${(bid.cum / maxCumBid) * 100}%`, opacity: 0.12 }}
-              />
-              <span style={{ color: "var(--buy)", fontWeight: 500 }}>
-                {formatTickPrice(bid.price, tickSize)}
-              </span>
-              <span style={{ textAlign: "right", color: "var(--text-secondary)" }}>
-                {formatSize(bid.size)}
-              </span>
-              <span style={{ textAlign: "right", color: "var(--text-muted)" }}>
-                {formatSize(bid.cum)}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+      )}
+    </Panel>
   );
 }
 
-function ModeSelector({
-  mode,
-  setMode,
+function LadderRow({
+  row,
+  side,
+  view,
+  decimals,
 }: {
-  mode: "single" | "aggregated" | "compact";
-  setMode: (m: "single" | "aggregated" | "compact") => void;
+  row: Row;
+  side: "bid" | "ask";
+  view: { median: number; wallSize: number; maxSize: number; maxCum: number };
+  decimals: number;
 }) {
-  const modes: Array<{ value: "single" | "aggregated" | "compact"; label: string }> = [
-    { value: "single", label: "Single" },
-    { value: "aggregated", label: "Aggregated" },
-    { value: "compact", label: "Compact" },
-  ];
+  const wall = view.median > 0 && row.size >= view.wallSize;
   return (
-    <div className="tab-group" style={{ gap: 0 }}>
-      {modes.map((m) => (
-        <button
-          key={m.value}
-          className={`tab ${mode === m.value ? "active" : ""}`}
-          onClick={() => setMode(m.value)}
-          style={{ padding: "1px 5px", fontSize: 9 }}
-        >
-          {m.label}
-        </button>
-      ))}
+    <div
+      className={`ladder-row ${side} ${wall ? "is-wall" : ""}`}
+      onMouseMove={(e) =>
+        showTooltip(
+          `${side === "bid" ? "Bid" : "Ask"} ${formatPriceValue(row.price, decimals)}`,
+          [
+            `Size: ${formatCompact(row.size, 3)}`,
+            `Cumulative: ${formatCompact(row.cum, 3)}`,
+            `vs median level: ${view.median ? (row.size / view.median).toFixed(1) : "—"}×`,
+            "",
+            `What this means: Resting limit ${side === "bid" ? "buy" : "sell"} orders. ${wall ? "This level is a liquidity wall (≥4× the median level size)." : "Cumulative size is the liquidity that must be consumed to move price through this level."}`,
+          ].join("\n"),
+          e
+        )
+      }
+      onMouseLeave={hideTooltip}
+    >
+      <i className="ladder-cum" style={{ width: `${(row.cum / view.maxCum) * 100}%` }} />
+      <i className="ladder-bar" style={{ width: `${(row.size / view.maxSize) * 100}%` }} />
+      <span className="ladder-price">{formatPriceValue(row.price, decimals)}</span>
+      <span className="ladder-size">{formatCompact(row.size, 2)}</span>
+      <span className="ladder-total">{formatCompact(row.cum, 1)}</span>
     </div>
   );
 }
