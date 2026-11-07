@@ -171,10 +171,13 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
       level.size > 0;
     const bids = book.bids.filter(isValidLevel);
     const asks = book.asks.filter(isValidLevel);
-    if (bids.length === 0 || asks.length === 0) {
+    // A momentarily one-sided book (e.g. while a delta stream is warming up)
+    // is not a feed failure; skip it instead of flipping the venue to error.
+    if (bids.length === 0 && asks.length === 0) {
       this.reportError(`Invalid ${this.venue} order book payload`);
       return;
     }
+    if (bids.length === 0 || asks.length === 0) return;
     this.emit("orderbook", { ...book, bids, asks });
   }
 
