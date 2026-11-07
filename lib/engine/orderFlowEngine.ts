@@ -63,7 +63,12 @@ export function getAutoTickSize(price: number): number {
 
 export function getTickDecimals(tickSize: number): number {
   if (!Number.isFinite(tickSize) || tickSize <= 0) return 0;
-  return Math.max(0, Math.ceil(-Math.log10(tickSize) - 1e-10));
+  // Smallest number of decimals that represents the step exactly (0.25 → 2, 0.5 → 1).
+  for (let decimals = 0; decimals <= 10; decimals++) {
+    const scaled = tickSize * 10 ** decimals;
+    if (Math.abs(scaled - Math.round(scaled)) < 1e-9 * Math.max(1, scaled)) return decimals;
+  }
+  return 10;
 }
 
 export function formatPrice(price: number, tickSize: number): string {
