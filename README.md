@@ -1,5 +1,7 @@
 # Order Flow Tracker
 
+![orderflow. terminal: footprint chart with session profile and VWAP, order book, book imbalance, time & sales, cumulative delta, volume z-score and realized volatility](docs/media/orderflow-v2.1-demo.gif)
+
 Order Flow Tracker is a real-time market data terminal for studying executed
 volume, price distribution, liquidity, and market microstructure. It provides a
 compact analytical workspace for crypto markets and selected foreign-exchange
