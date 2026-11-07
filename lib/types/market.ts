@@ -99,6 +99,8 @@ export interface FootprintCandle {
   tradeCount: number;
   maxVolumeAtLevel: number;
   complete: boolean;
+  vwap?: number; // session VWAP at the latest trade in this candle
+  vwapStd?: number; // volume-weighted σ of session prices at that point
   venueVolumes: Partial<Record<Venue, number>>;
 }
 
@@ -171,12 +173,42 @@ export interface AbsorptionEvent {
 }
 
 // ----------------------------------------------------------
-// Volatility / Z-Score
+// Flow bar — fixed 1-second time bucket of executed flow.
+// Source series for volume z-score, realized volatility and CVD.
 // ----------------------------------------------------------
-export interface ZScorePoint {
-  timestamp: number;
-  value: number;
+export interface FlowBar {
+  time: number; // bucket open (ms)
+  open: number;
+  high: number;
+  low: number;
+  close: number;
   volume: number;
+  buyVolume: number;
+  sellVolume: number;
+  trades: number;
+  cvd: number; // session cumulative delta at bar close
+}
+
+// ----------------------------------------------------------
+// Session statistics (since the feed connected)
+// ----------------------------------------------------------
+export interface SessionStats {
+  startTime: number;
+  open: number;
+  high: number;
+  low: number;
+  last: number;
+  volume: number;
+  notional: number;
+  buyVolume: number;
+  sellVolume: number;
+  trades: number;
+  maxTrade: number;
+  vwap: number;
+  vwapStd: number;
+  sumPQ: number;
+  sumP2Q: number;
+  lastTradeLagMs: number;
 }
 
 // ----------------------------------------------------------
@@ -212,14 +244,16 @@ export type ToolProfile = "order-flow" | "liquidity" | "volatility";
 
 
 export interface PanelVisibility {
-  volumeProfile: boolean;
   footprint: boolean;
+  volumeProfile: boolean; // session profile attached to the footprint
+  heatmap: boolean; // traded-volume heatmap behind the footprint
+  orderBook: boolean;
+  obi: boolean;
+  timeSales: boolean;
+  cvd: boolean;
+  volumeZ: boolean;
   volatility: boolean;
   depthOfMarket: boolean;
-  tradesProfile: boolean;
-  obi: boolean;
-  orderBook: boolean;
-  heatmap: boolean;
 }
 
 // ----------------------------------------------------------
@@ -232,8 +266,7 @@ export type WSMessageType =
   | "footprint_candle"
   | "connection_status"
   | "obi"
-  | "volume_profile"
-  | "z_score";
+  | "volume_profile";
 
 export interface WSMessage<T = unknown> {
   type: WSMessageType;

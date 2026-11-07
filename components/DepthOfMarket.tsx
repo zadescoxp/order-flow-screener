@@ -1,263 +1,181 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback } from "react";
+import React, { useCallback, useRef } from "react";
 import { useSessionStore } from "@/lib/session/SessionContext";
-import { useUIStore } from "@/lib/store/uiStore";
-import { scheduleCanvasRedraw } from "@/lib/session/canvasScheduler";
+import { useCanvas, withAlpha, monoFont, type Palette } from "@/hooks/useCanvas";
+import { STUDY_AXIS_W, STUDY_TIME_H, drawEmpty, drawValueAxis, niceStep } from "@/lib/chartUtils";
+import { formatCompact, formatPriceValue, priceDecimals, VENUE_LABEL } from "@/lib/format";
+import { Icon } from "@/components/ui/Icons";
+import { Panel, Stat } from "@/components/ui/Primitives";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
+import type { OrderBookLevel } from "@/lib/types/market";
 
-// ─── Depth of Market (Canvas) ───────────────────────────────────
-// Cumulative bid/ask depth curve, synchronized with crosshair.
+// ─── Depth of Market ─────────────────────────────────────────────
+// Cumulative resting liquidity on each side of the mid, with depth
+// read-outs at fixed distances from the mid price.
+
+const MAX_LEVELS = 100;
+
+function cumulative(levels: OrderBookLevel[]) {
+  let cum = 0;
+  return levels.slice(0, MAX_LEVELS).map((l) => ({ price: l.price, cum: (cum += l.size) }));
+}
+
+function depthWithin(levels: OrderBookLevel[], mid: number, bps: number) {
+  const limit = (mid * bps) / 10_000;
+  return levels.reduce((sum, l) => (Math.abs(l.price - mid) <= limit ? sum + l.size : sum), 0);
+}
 
 export default function DepthOfMarket() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const orderBook = useSessionStore((s) => s.orderBook);
+  const aggregatedBook = useSessionStore((s) => s.aggregatedBook);
+  const selectedVenues = useSessionStore((s) => s.selectedVenues);
   const crosshairPrice = useSessionStore((s) => s.crosshairPrice);
-  const ticker = useSessionStore((s) => s.ticker);
-  const theme = useUIStore((s) => s.theme);
+  const tickSize = useSessionStore((s) => s.tickSize);
+  const book = selectedVenues.length > 1 ? aggregatedBook ?? orderBook : orderBook ?? aggregatedBook;
+  const geometryRef = useRef<{ min: number; max: number; plotR: number } | null>(null);
 
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+  const bestBid = book?.bids[0]?.price ?? 0;
+  const bestAsk = book?.asks[0]?.price ?? 0;
+  const mid = bestBid && bestAsk ? (bestBid + bestAsk) / 2 : 0;
+  const decimals = priceDecimals(tickSize, mid);
 
-    const W = canvas.width;
-    const H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
+  const draw = useCallback(
+    (ctx: CanvasRenderingContext2D, W: number, H: number, p: Palette) => {
+      ctx.fillStyle = p.bgPanel;
+      ctx.fillRect(0, 0, W, H);
+      const plotR = W - STUDY_AXIS_W;
+      const plotT = 8;
+      const plotB = H - STUDY_TIME_H;
+      geometryRef.current = null;
+      if (!book || !book.bids.length || !book.asks.length || !mid) {
+        drawEmpty(ctx, W, H, "Waiting for order book…", p);
+        return;
+      }
+      const bids = cumulative(book.bids);
+      const asks = cumulative(book.asks);
+      // Symmetric window around mid so both sides share a scale.
+      const reach = Math.min(mid - bids[bids.length - 1].price, asks[asks.length - 1].price - mid);
+      const min = mid - reach;
+      const max = mid + reach;
+      if (reach <= 0) return;
+      const xOf = (price: number) => ((price - min) / (max - min)) * plotR;
+      const visibleBids = bids.filter((b) => b.price >= min);
+      const visibleAsks = asks.filter((a) => a.price <= max);
+      const maxCum = Math.max(visibleBids.at(-1)?.cum ?? 0, visibleAsks.at(-1)?.cum ?? 0) * 1.1 || 1;
+      const yOf = (v: number) => plotT + ((maxCum - v) / maxCum) * (plotB - plotT);
+      drawValueAxis(ctx, 0, maxCum, yOf, plotR, plotT, plotB, W, p, (v) => formatCompact(v));
 
-    const cs = getComputedStyle(document.documentElement);
-    const bgBase    = cs.getPropertyValue("--bg-base").trim()     || "#0a0a0c";
-    const textMuted  = cs.getPropertyValue("--text-muted").trim() || "#4a4a66";
-    const buy        = cs.getPropertyValue("--buy").trim()         || "#26a69a";
-    const sell       = cs.getPropertyValue("--sell").trim()        || "#ef5350";
-    const highlight  = cs.getPropertyValue("--highlight").trim()   || "#7c6af5";
-
-    const hex2rgba = (hex: string, a: number) => {
-      if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
-      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-      return `rgba(${r},${g},${b},${a})`;
-    };
-
-    ctx.fillStyle = bgBase;
-    ctx.fillRect(0, 0, W, H);
-
-    if (!orderBook || !ticker) {
-      ctx.fillStyle = textMuted;
-      ctx.font = "10px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText("Waiting for order book…", W / 2, H / 2);
-      return;
-    }
-
-    const midPrice = ticker.price;
-
-    const bids = orderBook.bids.slice(0, 50);
-    const asks = orderBook.asks.slice(0, 50);
-
-    if (bids.length === 0 || asks.length === 0) return;
-
-    const minPrice = bids[bids.length - 1]?.price ?? midPrice * 0.98;
-    const maxPrice = asks[asks.length - 1]?.price ?? midPrice * 1.02;
-    const priceRange = maxPrice - minPrice;
-
-    if (priceRange <= 0) return;
-
-    const priceToX = (p: number) => ((p - minPrice) / priceRange) * W;
-
-    let cumBid = 0;
-    const bidPoints: { x: number; y: number }[] = [];
-    for (let i = 0; i < bids.length; i++) {
-      cumBid += bids[i].size;
-      bidPoints.push({ x: priceToX(bids[i].price), y: cumBid });
-    }
-
-    let cumAsk = 0;
-    const askPoints: { x: number; y: number }[] = [];
-    for (let i = 0; i < asks.length; i++) {
-      cumAsk += asks[i].size;
-      askPoints.push({ x: priceToX(asks[i].price), y: cumAsk });
-    }
-
-    const maxCum = Math.max(cumBid, cumAsk);
-    const volToY = (v: number) => H - (v / maxCum) * (H - 20) - 4;
-
-    // Bid area
-    ctx.beginPath();
-    ctx.moveTo(priceToX(midPrice), H);
-    for (const { x, y } of bidPoints) ctx.lineTo(x, volToY(y));
-    ctx.lineTo(bidPoints[bidPoints.length - 1]?.x ?? 0, H);
-    ctx.closePath();
-    ctx.fillStyle = hex2rgba(buy, 0.15);
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(priceToX(midPrice), volToY(0));
-    for (const { x, y } of bidPoints) ctx.lineTo(x, volToY(y));
-    ctx.strokeStyle = buy;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    // Ask area
-    ctx.beginPath();
-    ctx.moveTo(priceToX(midPrice), H);
-    for (const { x, y } of askPoints) ctx.lineTo(x, volToY(y));
-    ctx.lineTo(askPoints[askPoints.length - 1]?.x ?? W, H);
-    ctx.closePath();
-    ctx.fillStyle = hex2rgba(sell, 0.15);
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(priceToX(midPrice), volToY(0));
-    for (const { x, y } of askPoints) ctx.lineTo(x, volToY(y));
-    ctx.strokeStyle = sell;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    // Mid price line
-    const midX = priceToX(midPrice);
-    ctx.strokeStyle = hex2rgba(highlight, 0.6);
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 2]);
-    ctx.beginPath();
-    ctx.moveTo(midX, 0);
-    ctx.lineTo(midX, H);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    if (crosshairPrice !== null) {
-      const cx = priceToX(crosshairPrice);
-      if (cx >= 0 && cx <= W) {
-        ctx.strokeStyle = hex2rgba(textMuted, 0.4);
-        ctx.lineWidth = 0.5;
+      const side = (points: { price: number; cum: number }[], color: string) => {
         ctx.beginPath();
-        ctx.moveTo(cx, 0);
-        ctx.lineTo(cx, H);
+        ctx.moveTo(xOf(mid), plotB);
+        let prevY = plotB;
+        for (const pt of points) {
+          const x = xOf(pt.price);
+          ctx.lineTo(x, prevY);
+          prevY = yOf(pt.cum);
+          ctx.lineTo(x, prevY);
+        }
+        const endX = color === p.buy ? 0 : plotR;
+        ctx.lineTo(endX, prevY);
+        ctx.lineTo(endX, plotB);
+        ctx.closePath();
+        const grad = ctx.createLinearGradient(0, plotT, 0, plotB);
+        grad.addColorStop(0, withAlpha(color, 0.35));
+        grad.addColorStop(1, withAlpha(color, 0.05));
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      };
+      side(visibleBids, p.buy);
+      side(visibleAsks, p.sell);
+
+      ctx.strokeStyle = withAlpha(p.text, 0.5);
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(Math.round(xOf(mid)) + 0.5, plotT);
+      ctx.lineTo(Math.round(xOf(mid)) + 0.5, plotB);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (crosshairPrice !== null && crosshairPrice >= min && crosshairPrice <= max) {
+        ctx.strokeStyle = withAlpha(p.accent, 0.7);
+        ctx.beginPath();
+        ctx.moveTo(Math.round(xOf(crosshairPrice)) + 0.5, plotT);
+        ctx.lineTo(Math.round(xOf(crosshairPrice)) + 0.5, plotB);
         ctx.stroke();
       }
-    }
 
-    ctx.fillStyle = textMuted;
-    ctx.font = "8px monospace";
-    ctx.textAlign = "center";
-    const labelStep = Math.ceil(priceRange / 8 / 10) * 10;
-    for (let p = Math.ceil(minPrice / labelStep) * labelStep; p <= maxPrice; p += labelStep) {
-      ctx.fillText(p.toLocaleString("en-US"), priceToX(p), H - 2);
-    }
+      // Price axis
+      ctx.fillStyle = p.bgPanel;
+      ctx.fillRect(0, plotB, W, STUDY_TIME_H);
+      ctx.fillStyle = p.borderMuted;
+      ctx.fillRect(0, plotB, W, 1);
+      ctx.font = monoFont(9);
+      ctx.fillStyle = p.textMuted;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const step = niceStep(max - min, Math.max(2, Math.floor(plotR / 90)));
+      for (let price = Math.ceil(min / step) * step; price <= max; price += step) {
+        const x = xOf(price);
+        if (x < 30 || x > plotR - 30) continue;
+        ctx.fillText(formatPriceValue(price, decimals), x, plotB + STUDY_TIME_H / 2 + 1);
+      }
+      geometryRef.current = { min, max, plotR };
+    },
+    [book, mid, crosshairPrice, decimals]
+  );
 
-    ctx.textAlign = "right";
-    ctx.fillStyle = textMuted;
-    for (let i = 1; i <= 3; i++) {
-      const v = (maxCum / 4) * i;
-      const y = volToY(v);
-      ctx.fillText(
-        v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v.toFixed(0),
-        W - 2, y
-      );
-    }
+  const { containerRef, canvasRef } = useCanvas(draw);
 
-    const fmt = (v: number) =>
-      v >= 1_000_000 ? (v / 1_000_000).toFixed(2) + "M"
-      : v >= 1_000   ? (v / 1_000).toFixed(2) + "K"
-      : v.toFixed(4);
-    ctx.font = "9px monospace";
-    ctx.textAlign = "left";
-    ctx.fillStyle = buy;
-    ctx.fillText(`■ Bids ${fmt(cumBid)}`, 4, 12);
-    ctx.fillStyle = sell;
-    ctx.fillText(`■ Asks ${fmt(cumAsk)}`, 4, 22);
-  }, [orderBook, crosshairPrice, ticker, theme]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
-    scheduleCanvasRedraw(draw);
-  }, [draw]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    const canvas = canvasRef.current;
-    if (!container || !canvas) return;
-    const obs = new ResizeObserver(() => {
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
-      scheduleCanvasRedraw(draw);
-    });
-    obs.observe(container);
-    return () => obs.disconnect();
-  }, [draw]);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !orderBook || !ticker) {
-      hideTooltip();
-      return;
-    }
-    const rect = canvas.getBoundingClientRect();
+  const handleMove = (e: React.MouseEvent) => {
+    const geometry = geometryRef.current;
+    if (!geometry || !book) return hideTooltip();
+    const rect = containerRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    
-    const midPrice = ticker.price;
-    const bids = orderBook.bids.slice(0, 50);
-    const asks = orderBook.asks.slice(0, 50);
-    if (bids.length === 0 || asks.length === 0) return;
+    if (x > geometry.plotR) return hideTooltip();
+    const price = geometry.min + (x / geometry.plotR) * (geometry.max - geometry.min);
+    const isBid = price < mid;
+    const levels = isBid ? book.bids : book.asks;
+    const size = levels.reduce((s, l) => ((isBid ? l.price >= price : l.price <= price) ? s + l.size : s), 0);
+    const distance = ((price - mid) / mid) * 10_000;
+    showTooltip(
+      `${isBid ? "Bid" : "Ask"} depth to ${formatPriceValue(price, decimals)}`,
+      [
+        `Distance from mid: ${distance.toFixed(1)} bp`,
+        `Cumulative ${isBid ? "bids" : "asks"}: ${formatCompact(size, 3)}`,
+        "",
+        `What this means: Size that must trade to push price ${isBid ? "down" : "up"} to this level.`,
+      ].join("\n"),
+      e
+    );
+  };
 
-    const minPrice = bids[bids.length - 1]?.price ?? midPrice * 0.98;
-    const maxPrice = asks[asks.length - 1]?.price ?? midPrice * 1.02;
-    const priceRange = maxPrice - minPrice;
-
-    // Convert x back to price
-    const hoveredPrice = minPrice + (x / canvas.width) * priceRange;
-
-    // Is it a bid or ask?
-    if (hoveredPrice < midPrice) {
-      // Find closest bid
-      let cumSize = 0;
-      for (const b of bids) {
-        cumSize += b.size;
-        if (b.price <= hoveredPrice) break; // accumulated up to this price going down
-      }
-      showTooltip(
-        `Bid Depth around ${hoveredPrice.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
-        `Cumulative Bid Size: ${cumSize.toFixed(2)}\n\nWhat this means: This is the total limit buy order size supporting the price from falling down to this level.`,
-        e
-      );
-    } else {
-      let cumSize = 0;
-      for (const a of asks) {
-        cumSize += a.size;
-        if (a.price >= hoveredPrice) break; // accumulated up to this price going up
-      }
-      showTooltip(
-        `Ask Depth around ${hoveredPrice.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
-        `Cumulative Ask Size: ${cumSize.toFixed(2)}\n\nWhat this means: This is the total limit sell order size blocking the price from rising up to this level.`,
-        e
-      );
-    }
-  }, [orderBook, ticker]);
+  const d10b = book && mid ? depthWithin(book.bids, mid, 10) : 0;
+  const d10a = book && mid ? depthWithin(book.asks, mid, 10) : 0;
+  const d25b = book && mid ? depthWithin(book.bids, mid, 25) : 0;
+  const d25a = book && mid ? depthWithin(book.asks, mid, 25) : 0;
+  const ratio = (b: number, a: number) => (a > 0 ? `${(b / a).toFixed(2)}×` : "—");
+  const source = book && "venue" in book ? VENUE_LABEL[book.venue] ?? book.venue : "Consolidated";
 
   return (
-    <div className="panel" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div className="panel-header">
-        <span className="panel-title">Depth of Market</span>
-        {orderBook && (
-          <span style={{ fontSize: 9.5, color: "var(--text-muted)" }}>
-            {orderBook.venue.replace("-", " ").toUpperCase()}
-          </span>
-        )}
+    <Panel
+      title="Market Depth" icon={<Icon.Depth />}
+      subtitle={source}
+      footer={
+        <div className="study-stats">
+          <Stat label="±10 bp bid" value={formatCompact(d10b)} tone="buy" />
+          <Stat label="±10 bp ask" value={formatCompact(d10a)} tone="sell" />
+          <Stat label="Bid/Ask 10bp" value={ratio(d10b, d10a)} />
+          <Stat label="Bid/Ask 25bp" value={ratio(d25b, d25a)} />
+        </div>
+      }
+    >
+      <div ref={containerRef} className="canvas-host" onMouseMove={handleMove} onMouseLeave={hideTooltip}>
+        <canvas ref={canvasRef} />
       </div>
-      <div ref={containerRef} className="panel-content">
-        <canvas 
-          ref={canvasRef} 
-          style={{ display: "block", cursor: "crosshair" }} 
-          onMouseMove={handleMouseMove}
-          onMouseLeave={hideTooltip}
-        />
-      </div>
-    </div>
+    </Panel>
   );
 }

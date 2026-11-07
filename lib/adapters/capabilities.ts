@@ -1,12 +1,15 @@
 import type { MarketType, Venue, VenueSelection } from "@/lib/types/market";
 import { FOREX_SYMBOLS, isForexVenue } from "@/lib/config/venues";
+import { CRYPTO_SYMBOLS } from "@/lib/config/instruments";
 
-const PERPETUAL_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT", "LINKUSDT", "ARBUSDT", "OPUSDT"];
-const SPOT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
+const PERPETUAL_SYMBOLS = CRYPTO_SYMBOLS;
+const SPOT_SYMBOLS = CRYPTO_SYMBOLS;
 
+// Per-venue restrictions, from each exchange's public instrument listings.
 const VENUE_SYMBOLS: Partial<Record<Venue, readonly string[]>> = {
+  // Deribit lists inverse (USD-margined) perpetuals for BTC and ETH only.
   deribit: ["BTCUSDT", "ETHUSDT"],
-  "coinbase-spot": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+  "coinbase-spot": CRYPTO_SYMBOLS.filter((symbol) => symbol !== "TRXUSDT"),
 };
 
 const FOREX_VENUES: Venue[] = ["finnhub-forex"];

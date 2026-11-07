@@ -1,272 +1,234 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/lib/session/SessionContext";
-import { useUIStore } from "@/lib/store/uiStore";
-import { scheduleCanvasRedraw } from "@/lib/session/canvasScheduler";
+import {
+  averageTrueRange,
+  parkinsonVolatility,
+  percentileRank,
+  resampleBars,
+  rollingRealizedVolatility,
+  secondsPerYear,
+  type VolatilityPoint,
+} from "@/lib/engine/analytics";
+import { useCanvas, withAlpha, monoFont, type Palette } from "@/hooks/useCanvas";
+import {
+  RESOLUTIONS,
+  STUDY_AXIS_W,
+  STUDY_TIME_H,
+  drawAxisTag,
+  drawCrosshairX,
+  drawEmpty,
+  drawTimeAxis,
+  drawValueAxis,
+} from "@/lib/chartUtils";
+import { formatClock, formatPriceValue, priceDecimals } from "@/lib/format";
+import { Icon } from "@/components/ui/Icons";
+import { Panel, Segmented, Stat } from "@/components/ui/Primitives";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
+import type { Timeframe } from "@/lib/types/market";
 
-// ─── Volatility / Z-Score Panel (Canvas) ────────────────────────
-// Rolling Z-score of trade volume, with Volume Heatmap option.
+// ─── Realized Volatility ─────────────────────────────────────────
+// Rolling close-to-close realized volatility from log returns of
+// fixed time bars, annualized:  RV = √(mean r²) · √(bars per year).
+// Complemented by candle-based ATR and Parkinson (high-low) estimators.
 
-type ZTab = "zscore" | "heatmap";
+const WINDOWS = [
+  { value: 30, label: "30" },
+  { value: 60, label: "60" },
+  { value: 120, label: "120" },
+] as const;
+type Resolution = (typeof RESOLUTIONS)[number]["value"];
+type Window = (typeof WINDOWS)[number]["value"];
 
-const Z_WINDOWS = [20, 50, 100, 200] as const;
-type ZWindow = (typeof Z_WINDOWS)[number];
+const TIMEFRAME_SECONDS: Record<Timeframe, number> = {
+  "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400,
+};
 
-const Z_LEVELS = [
-  { value: 3, color: "rgba(255,68,68,0.8)", label: "+3" },
-  { value: 2, color: "rgba(255,136,0,0.7)", label: "+2" },
-  { value: 1, color: "rgba(255,204,0,0.6)", label: "+1" },
-  { value: 0, color: "rgba(100,100,140,0.3)", label: "0" },
-  { value: -1, color: "rgba(255,204,0,0.6)", label: "-1" },
-  { value: -2, color: "rgba(255,136,0,0.7)", label: "-2" },
-  { value: -3, color: "rgba(255,68,68,0.8)", label: "-3" },
-];
-
-function zScoreColor(z: number): string {
-  const absZ = Math.abs(z);
-  if (absZ >= 3) return z >= 0 ? "#ff4444" : "#ff4444";
-  if (absZ >= 2) return "#ff8800";
-  if (absZ >= 1) return "#ffcc00";
-  return "#5c5c80";
+function regime(percentile: number): { label: string; tone: "muted" | "accent" | "warn" | "sell" } {
+  if (percentile >= 90) return { label: "Extreme", tone: "sell" };
+  if (percentile >= 70) return { label: "Elevated", tone: "warn" };
+  if (percentile >= 30) return { label: "Normal", tone: "accent" };
+  return { label: "Compressed", tone: "muted" };
 }
 
 export default function VolatilityPanel() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const zScoreHistory = useSessionStore((s) => s.zScoreHistory);
+  const flowBars = useSessionStore((s) => s.flowBars);
+  const liveBar = useSessionStore((s) => s.liveBar);
+  const candles = useSessionStore((s) => s.candles);
+  const currentCandle = useSessionStore((s) => s.currentCandle);
+  const marketType = useSessionStore((s) => s.marketType);
+  const timeframe = useSessionStore((s) => s.timeframe);
+  const tickSize = useSessionStore((s) => s.tickSize);
   const crosshairTime = useSessionStore((s) => s.crosshairTime);
-  const theme = useUIStore((s) => s.theme);
-  const [tab, setTab] = useState<ZTab>("zscore");
-  const [window, setWindow] = useState<ZWindow>(20);
+  const [resolution, setResolution] = useState<Resolution>(15);
+  const [window, setWindow] = useState<Window>(60);
+  const visibleRef = useRef<{ points: VolatilityPoint[]; slot: number; plotR: number }>({ points: [], slot: 0, plotR: 0 });
 
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+  const yearSeconds = secondsPerYear(marketType);
+  const series = useMemo(() => {
+    const bars = liveBar ? [...flowBars, liveBar] : flowBars;
+    return rollingRealizedVolatility(resampleBars(bars, resolution), window, resolution, yearSeconds);
+  }, [flowBars, liveBar, resolution, window, yearSeconds]);
 
-    const W = canvas.width;
-    const H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
+  const values = useMemo(() => series.map((pt) => pt.value).filter((v): v is number => v !== null), [series]);
+  const current = values[values.length - 1] ?? null;
+  const pct = current === null ? 50 : percentileRank(values, current);
+  const reg = regime(pct);
+  const median = useMemo(() => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  }, [values]);
 
-    const cs = getComputedStyle(document.documentElement);
-    const bgBase    = cs.getPropertyValue("--bg-base").trim()       || "#0a0a0c";
-    const textMuted  = cs.getPropertyValue("--text-muted").trim()   || "#4a4a66";
-    const border     = cs.getPropertyValue("--border").trim()        || "#2a2a3a";
-    const borderMuted = cs.getPropertyValue("--border-muted").trim() || "#161620";
-    const buy        = cs.getPropertyValue("--buy").trim()           || "#26a69a";
-    const sell       = cs.getPropertyValue("--sell").trim()          || "#ef5350";
-    const highlight  = cs.getPropertyValue("--highlight").trim()     || "#7c6af5";
-    const neutral    = cs.getPropertyValue("--neutral").trim()       || "#5c5c80";
+  const allCandles = useMemo(() => (currentCandle ? [...candles, currentCandle] : candles), [candles, currentCandle]);
+  const completed = candles.filter((c) => c.tradeCount > 0);
+  const atr = averageTrueRange(completed.length ? completed : allCandles, 14);
+  const parkinson = parkinsonVolatility(completed.slice(-30), TIMEFRAME_SECONDS[timeframe], yearSeconds);
+  const lastPrice = allCandles[allCandles.length - 1]?.close ?? 0;
+  const liveRange = currentCandle && Number.isFinite(currentCandle.high) ? currentCandle.high - currentCandle.low : null;
+  const expansion = atr && liveRange !== null ? liveRange / atr : null;
+  const decimals = priceDecimals(tickSize, lastPrice);
 
-    const hex2rgba = (hex: string, a: number) => {
-      if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
-      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-      return `rgba(${r},${g},${b},${a})`;
-    };
+  const draw = useCallback(
+    (ctx: CanvasRenderingContext2D, W: number, H: number, p: Palette) => {
+      ctx.fillStyle = p.bgPanel;
+      ctx.fillRect(0, 0, W, H);
+      const plotR = W - STUDY_AXIS_W;
+      const plotT = 8;
+      const plotB = H - STUDY_TIME_H;
+      const ready = series.filter((pt) => pt.value !== null);
+      if (ready.length < 2) {
+        drawEmpty(ctx, W, H, `Collecting ${resolution}s returns for realized volatility…`, p);
+        visibleRef.current = { points: [], slot: 0, plotR };
+        return;
+      }
+      const capacity = Math.max(10, Math.floor(plotR / 2));
+      const points = ready.slice(-capacity);
+      const slot = plotR / Math.max(points.length - 1, 1);
+      const xOf = (i: number) => i * slot;
+      const vals = points.map((pt) => pt.value as number);
+      const max = Math.max(...vals) * 1.15 || 1;
+      const yOf = (v: number) => plotT + ((max - v) / max) * (plotB - plotT);
 
-    ctx.fillStyle = bgBase;
-    ctx.fillRect(0, 0, W, H);
+      drawValueAxis(ctx, 0, max, yOf, plotR, plotT, plotB, W, p, (v) => `${v.toFixed(v < 10 ? 1 : 0)}%`);
 
-    if (zScoreHistory.length < 2) {
-      ctx.fillStyle = textMuted;
-      ctx.font = "10px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText("Waiting for trade data…", W / 2, H / 2);
-      return;
-    }
-
-    const data = zScoreHistory.slice(-Math.floor(W));
-    const step = W / data.length;
-    const zeroY = H / 2;
-    const yScale = (H / 2 - 10) / 3;
-
-    if (tab === "zscore") {
-      for (const level of Z_LEVELS) {
-        const y = zeroY - level.value * yScale;
-        if (y < 0 || y > H) continue;
-        ctx.strokeStyle = Math.abs(level.value) >= 2 ? border : borderMuted;
-        ctx.lineWidth = Math.abs(level.value) === 3 ? 0.8 : 0.5;
-        ctx.setLineDash(level.value !== 0 ? [4, 3] : []);
+      // Percentile bands (70th / 90th) of the session distribution.
+      const sorted = [...values].sort((a, b) => a - b);
+      const p70 = sorted[Math.floor(sorted.length * 0.7)];
+      const p90 = sorted[Math.floor(sorted.length * 0.9)];
+      if (p70 !== undefined && p90 !== undefined) {
+        ctx.fillStyle = withAlpha(p.warn, 0.06);
+        ctx.fillRect(0, yOf(Math.min(max, p90)), plotR, yOf(p70) - yOf(Math.min(max, p90)));
+        ctx.fillStyle = withAlpha(p.sell, 0.06);
+        ctx.fillRect(0, plotT, plotR, Math.max(0, yOf(Math.min(max, p90)) - plotT));
+      }
+      if (median !== null) {
+        ctx.strokeStyle = withAlpha(p.textSecondary, 0.5);
+        ctx.setLineDash([4, 4]);
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(W, y);
+        ctx.moveTo(0, Math.round(yOf(median)) + 0.5);
+        ctx.lineTo(plotR, Math.round(yOf(median)) + 0.5);
         ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = neutral;
-        ctx.font = "8px monospace";
-        ctx.textAlign = "left";
-        ctx.fillText(level.label, 2, y - 1);
       }
 
+      // Area + line
+      const grad = ctx.createLinearGradient(0, plotT, 0, plotB);
+      grad.addColorStop(0, withAlpha(p.warn, 0.28));
+      grad.addColorStop(1, withAlpha(p.warn, 0.02));
       ctx.beginPath();
-      ctx.moveTo(0, zeroY);
-      for (let i = 0; i < data.length; i++) {
-        const x = i * step;
-        const y = zeroY - data[i].value * yScale;
-        ctx.lineTo(x, Math.max(0, Math.min(H, y)));
-      }
-      ctx.lineTo((data.length - 1) * step, zeroY);
+      ctx.moveTo(xOf(0), plotB);
+      vals.forEach((v, i) => ctx.lineTo(xOf(i), yOf(v)));
+      ctx.lineTo(xOf(vals.length - 1), plotB);
       ctx.closePath();
-      const grad = ctx.createLinearGradient(0, 0, 0, H);
-      grad.addColorStop(0, hex2rgba(highlight, 0.2));
-      grad.addColorStop(0.5, hex2rgba(highlight, 0.05));
-      grad.addColorStop(1, hex2rgba(highlight, 0));
       ctx.fillStyle = grad;
       ctx.fill();
+      ctx.beginPath();
+      vals.forEach((v, i) => (i ? ctx.lineTo(xOf(i), yOf(v)) : ctx.moveTo(xOf(i), yOf(v))));
+      ctx.strokeStyle = p.warn;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
 
-      for (let i = 1; i < data.length; i++) {
-        const x0 = (i - 1) * step;
-        const x1 = i * step;
-        const y0 = zeroY - data[i - 1].value * yScale;
-        const y1 = zeroY - data[i].value * yScale;
-        ctx.beginPath();
-        ctx.moveTo(x0, Math.max(0, Math.min(H, y0)));
-        ctx.lineTo(x1, Math.max(0, Math.min(H, y1)));
-        ctx.strokeStyle = zScoreColor(data[i].value);
-        ctx.lineWidth = 1;
-        ctx.stroke();
+      const last = vals[vals.length - 1];
+      drawAxisTag(ctx, yOf(last), plotR, W, `${last.toFixed(1)}%`, p.warn, p);
+      if (median !== null) {
+        ctx.fillStyle = p.textMuted;
+        ctx.font = monoFont(9, 600);
+        ctx.textAlign = "left";
+        ctx.fillText("MEDIAN", 6, yOf(median) - 6);
       }
-    } else {
-      for (let i = 0; i < data.length; i++) {
-        const x = i * step;
-        const z = data[i].value;
-        const intensity = Math.min(1, Math.abs(z) / 3);
-        ctx.fillStyle = hex2rgba(z >= 0 ? buy : sell, intensity * 0.8);
-        ctx.fillRect(x, 0, step + 1, H);
+
+      drawTimeAxis(ctx, points.map((pt) => pt.time), xOf, plotB, W, p, resolution < 60);
+      if (crosshairTime !== null) {
+        const idx = (crosshairTime - points[0].time) / (resolution * 1000);
+        if (idx >= 0 && idx <= points.length - 1) drawCrosshairX(ctx, xOf(idx), plotT, plotB, p);
       }
-    }
+      visibleRef.current = { points, slot, plotR };
+    },
+    [series, values, median, crosshairTime, resolution]
+  );
 
-    if (crosshairTime !== null && data.length > 0) {
-      const first = data[0].timestamp;
-      const last = data[data.length - 1].timestamp;
-      const range = last - first;
-      if (range > 0) {
-        const cx = ((crosshairTime - first) / range) * W;
-        if (cx >= 0 && cx <= W) {
-          ctx.strokeStyle = hex2rgba(textMuted, 0.4);
-          ctx.lineWidth = 0.5;
-          ctx.beginPath();
-          ctx.moveTo(cx, 0);
-          ctx.lineTo(cx, H);
-          ctx.stroke();
-        }
-      }
-    }
-  }, [zScoreHistory, tab, crosshairTime, theme]);
+  const { containerRef, canvasRef } = useCanvas(draw);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
-    scheduleCanvasRedraw(draw);
-  }, [draw]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    const canvas = canvasRef.current;
-    if (!container || !canvas) return;
-    const obs = new ResizeObserver(() => {
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
-      scheduleCanvasRedraw(draw);
-    });
-    obs.observe(container);
-    return () => obs.disconnect();
-  }, [draw]);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas || zScoreHistory.length < 2) { hideTooltip(); return; }
-    const rect = canvas.getBoundingClientRect();
+  const handleMove = (e: React.MouseEvent) => {
+    const rect = containerRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const data = zScoreHistory.slice(-Math.floor(canvas.width));
-    const step = canvas.width / data.length;
-    const index = Math.min(data.length - 1, Math.floor(x / step));
-    const point = data[index];
-    if (point) {
-      const z = point.value;
-      const absZ = Math.abs(z);
-      let intensity = "Normal";
-      if (absZ >= 3) intensity = "🚨 Extreme spike — very unusual volume";
-      else if (absZ >= 2) intensity = "⚠️ High — elevated volume spike";
-      else if (absZ >= 1) intensity = "📈 Elevated — above average volume";
-      else intensity = "Normal — average volume range";
-      showTooltip(
-        `Z-Score: ${z >= 0 ? "+" : ""}${z.toFixed(2)}`,
-        `Intensity: ${intensity}\nTime: ${new Date(point.timestamp).toLocaleTimeString()}\n\nWhat this means: The Z-Score compares current trade volume against the rolling average. A Z-Score above +2 or below -2 signals an unusual volume spike — often a sign of institutional activity or news-driven momentum.`,
-        e
-      );
-    } else {
-      hideTooltip();
-    }
-  }, [zScoreHistory]);
-
-  const lastZ = zScoreHistory[zScoreHistory.length - 1]?.value ?? 0;
+    const { points, slot, plotR } = visibleRef.current;
+    if (!points.length || x > plotR) return hideTooltip();
+    const pt = points[Math.round(x / slot)];
+    if (!pt || pt.value === null) return hideTooltip();
+    const r = regime(percentileRank(values, pt.value));
+    showTooltip(
+      `Realized vol ${pt.value.toFixed(2)}%`,
+      [
+        `Time: ${formatClock(pt.time)}`,
+        `Window: ${window} × ${resolution === 60 ? "1m" : `${resolution}s`} returns`,
+        `Session percentile: ${percentileRank(values, pt.value).toFixed(0)}th`,
+        `Regime: ${r.label}`,
+        "",
+        "What this means: Annualized standard deviation of log returns over the window. It measures how much price is moving, independent of volume.",
+      ].join("\n"),
+      e
+    );
+  };
 
   return (
-    <div className="panel" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div className="panel-header">
-        <span className="panel-title">Volatility / Z-Score</span>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {/* Window selector */}
-          <div className="tab-group" style={{ gap: 0 }}>
-            {Z_WINDOWS.map((w) => (
-              <button
-                key={w}
-                className={`tab ${window === w ? "active" : ""}`}
-                onClick={() => setWindow(w)}
-                style={{ padding: "1px 5px", fontSize: 9 }}
-              >
-                {w}
-              </button>
-            ))}
-          </div>
-          <div className="topbar-sep" style={{ margin: 0 }} />
-          {/* Tab selector */}
-          <div className="tab-group" style={{ gap: 0 }}>
-            <button
-              className={`tab ${tab === "zscore" ? "active" : ""}`}
-              onClick={() => setTab("zscore")}
-              style={{ padding: "1px 6px", fontSize: 9 }}
-            >
-              Z-Score
-            </button>
-            <button
-              className={`tab ${tab === "heatmap" ? "active" : ""}`}
-              onClick={() => setTab("heatmap")}
-              style={{ padding: "1px 6px", fontSize: 9 }}
-            >
-              Volume Heatmap
-            </button>
-          </div>
-          {/* Current Z value */}
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: zScoreColor(lastZ),
-              marginLeft: 4,
-              fontFamily: "monospace",
-            }}
-          >
-            {lastZ >= 0 ? "+" : ""}{lastZ.toFixed(2)}
-          </span>
+    <Panel
+      title="Realized Volatility" icon={<Icon.Pulse />}
+      subtitle={`annualized · ${window} × ${resolution === 60 ? "1m" : `${resolution}s`} log returns`}
+      value={<span className={`tone-${reg.tone}`}>{current === null ? "—" : `${current.toFixed(1)}%`}</span>}
+      actions={
+        <>
+          <Segmented size="xs" value={resolution} onChange={setResolution} options={RESOLUTIONS} ariaLabel="Return interval" />
+          <Segmented size="xs" value={window} onChange={setWindow} options={WINDOWS} ariaLabel="Lookback window" />
+        </>
+      }
+      footer={
+        <div className="study-stats">
+          <Stat label="Regime" value={reg.label} sub={current === null ? undefined : `p${pct.toFixed(0)}`} tone={reg.tone} />
+          <Stat
+            label={`ATR 14 · ${timeframe}`}
+            value={atr === null ? "—" : formatPriceValue(atr, decimals)}
+            sub={atr && lastPrice ? `${((atr / lastPrice) * 100).toFixed(2)}%` : undefined}
+          />
+          <Stat
+            label="Range / ATR"
+            value={expansion === null ? "—" : `${expansion.toFixed(2)}×`}
+            tone={expansion !== null && expansion >= 1.5 ? "warn" : undefined}
+            title="Live candle range relative to ATR — above 1× means the candle is already wider than average"
+          />
+          <Stat
+            label="Parkinson"
+            value={parkinson === null ? "—" : `${parkinson.toFixed(1)}%`}
+            title={`High-low volatility estimator over the last ${Math.min(30, completed.length)} ${timeframe} candles, annualized`}
+          />
         </div>
+      }
+    >
+      <div ref={containerRef} className="canvas-host" onMouseMove={handleMove} onMouseLeave={hideTooltip}>
+        <canvas ref={canvasRef} />
       </div>
-      <div ref={containerRef} className="panel-content">
-        <canvas
-          ref={canvasRef}
-          style={{ display: "block", cursor: "crosshair" }}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={hideTooltip}
-        />
-      </div>
-    </div>
+    </Panel>
   );
 }

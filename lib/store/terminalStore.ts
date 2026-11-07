@@ -1,29 +1,30 @@
 // ============================================================
-// ZUSTAND STORE — Terminal UI State + Market Data State
+// ZUSTAND STORE — Per-session market settings + market data
+// UI preferences (theme, panels, profiles) live in uiStore.
 // ============================================================
 
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
-import { type Theme, applyTheme } from "@/lib/theme";
 import type {
   Venue,
   VenueSelection,
   MarketType,
   Timeframe,
-  ToolProfile,
-  PanelVisibility,
   NormalizedTrade,
   NormalizedOrderBook,
   AggregatedOrderBook,
   FootprintCandle,
   VolumeProfile,
   OBISnapshot,
-  ZScorePoint,
+  FlowBar,
+  SessionStats,
   VenueConnection,
   MarketTicker,
 } from "@/lib/types/market";
 import { RingBuffer } from "@/lib/session/RingBuffer";
 import { isForexVenue } from "@/lib/config/venues";
+
+export type OrderBookMode = "single" | "aggregated" | "compact";
 
 // ----------------------------------------------------------
 // Terminal Settings
@@ -34,14 +35,11 @@ export interface TerminalSettings {
   selectedVenues: Venue[];
   marketType: MarketType;
   timeframe: Timeframe;
-  toolProfile: ToolProfile;
   tickSize: number;
   imbalanceThreshold: number;
   stackedImbalanceLevels: number;
-  zScoreWindow: number;
-  orderBookMode: "single" | "aggregated" | "compact";
-  panels: PanelVisibility;
-  theme: Theme;
+  orderBookMode: OrderBookMode;
+  valueAreaPct: number;
 }
 
 // ----------------------------------------------------------
@@ -56,42 +54,31 @@ export interface MarketDataState {
   aggregatedBook: AggregatedOrderBook | null;
   obiHistory: OBISnapshot[];
   currentOBI: number;
-  zScoreHistory: ZScorePoint[];
+  flowBars: FlowBar[]; // completed 1-second bars
+  liveBar: FlowBar | null; // bar still being built
+  session: SessionStats | null;
   connections: Record<string, VenueConnection>;
   ticker: MarketTicker | null;
   crosshairTime: number | null;
   crosshairPrice: number | null;
-  cumulativeDelta: number;
 }
 
 // ----------------------------------------------------------
 // Actions
 // ----------------------------------------------------------
 export interface TerminalActions {
-  // Settings
   setSymbol: (s: string) => void;
   setVenue: (v: VenueSelection) => void;
   setSelectedVenues: (venues: Venue[]) => void;
   setMarketType: (m: MarketType) => void;
   setTimeframe: (t: Timeframe) => void;
-  setToolProfile: (tp: ToolProfile) => void;
   setTickSize: (ts: number) => void;
   setImbalanceThreshold: (t: number) => void;
-  setOrderBookMode: (m: "single" | "aggregated" | "compact") => void;
-  setPanelVisible: (panel: keyof PanelVisibility, visible: boolean) => void;
-  setTheme: (theme: Theme) => void;
+  setOrderBookMode: (m: OrderBookMode) => void;
+  setValueAreaPct: (pct: number) => void;
 
-  // Market data mutations
-  pushTrade: (trade: NormalizedTrade) => void;
-  updateOrderBook: (book: NormalizedOrderBook) => void;
-  updateAggregatedBook: (book: AggregatedOrderBook | null) => void;
-  updateCurrentCandle: (candle: FootprintCandle) => void;
   finalizeCandle: (candle: FootprintCandle) => void;
-  setVolumeProfile: (vp: VolumeProfile) => void;
-  pushOBI: (snap: OBISnapshot) => void;
-  pushZScore: (z: ZScorePoint) => void;
   updateConnection: (conn: VenueConnection) => void;
-  updateTicker: (t: MarketTicker) => void;
   applyMarketDataBatch: (batch: MarketDataBatch) => void;
   setCrosshair: (time: number | null, price: number | null) => void;
   resetMarketData: () => void;
@@ -107,45 +94,15 @@ export interface MarketDataBatch {
   volumeProfile: VolumeProfile | null;
   ticker: MarketTicker | null;
   obi: OBISnapshot | null;
-  zScores: ZScorePoint[];
+  flowBars: FlowBar[];
+  liveBar: FlowBar | null;
+  session: SessionStats | null;
   connections: VenueConnection[];
 }
 
-// ----------------------------------------------------------
-// Default panel visibility per tool profile
-// ----------------------------------------------------------
-const PROFILE_PANELS: Record<ToolProfile, PanelVisibility> = {
-  "order-flow": {
-    volumeProfile: true,
-    footprint: true,
-    volatility: false,
-    depthOfMarket: true,
-    tradesProfile: true,
-    obi: true,
-    orderBook: true,
-    heatmap: false,
-  },
-  liquidity: {
-    volumeProfile: false,
-    footprint: true,
-    volatility: false,
-    depthOfMarket: true,
-    tradesProfile: false,
-    obi: true,
-    orderBook: true,
-    heatmap: true,
-  },
-  volatility: {
-    volumeProfile: true,
-    footprint: true,
-    volatility: true,
-    depthOfMarket: false,
-    tradesProfile: false,
-    obi: false,
-    orderBook: false,
-    heatmap: true,
-  },
-};
+export const MAX_FLOW_BARS = 7200; // two hours of 1-second bars
+const MAX_CANDLES = 500;
+const MAX_OBI_POINTS = 600;
 
 const INITIAL_SETTINGS: TerminalSettings = {
   symbol: "BTCUSDT",
@@ -153,14 +110,11 @@ const INITIAL_SETTINGS: TerminalSettings = {
   selectedVenues: ["bybit-futures"],
   marketType: "perpetual",
   timeframe: "5m",
-  toolProfile: "order-flow",
   tickSize: 10,
   imbalanceThreshold: 3,
   stackedImbalanceLevels: 3,
-  zScoreWindow: 20,
   orderBookMode: "single",
-  panels: PROFILE_PANELS["order-flow"],
-  theme: "dark",
+  valueAreaPct: 0.7,
 };
 
 const INITIAL_MARKET: MarketDataState = {
@@ -172,12 +126,13 @@ const INITIAL_MARKET: MarketDataState = {
   aggregatedBook: null,
   obiHistory: [],
   currentOBI: 0,
-  zScoreHistory: [],
+  flowBars: [],
+  liveBar: null,
+  session: null,
   connections: {},
   ticker: null,
   crosshairTime: null,
   crosshairPrice: null,
-  cumulativeDelta: 0,
 };
 
 // ----------------------------------------------------------
@@ -186,146 +141,98 @@ const INITIAL_MARKET: MarketDataState = {
 export const createTerminalStore = () => {
   const recentTradeBuffer = new RingBuffer<NormalizedTrade>(500);
   return create<TerminalStore>()(
-  subscribeWithSelector((set) => ({
-    ...INITIAL_SETTINGS,
-    ...INITIAL_MARKET,
+    subscribeWithSelector((set) => ({
+      ...INITIAL_SETTINGS,
+      ...INITIAL_MARKET,
 
-    // --- Settings ---
-    setSymbol: (symbol) =>
-      set((s) => ({ symbol, ...INITIAL_MARKET })),
+      setSymbol: (symbol) => set({ symbol, ...INITIAL_MARKET }),
 
-    setVenue: (venue) =>
-      set((s) => ({
-        venue,
-        selectedVenues:
-          venue === "all-perps" || venue === "all-spot"
-            ? s.selectedVenues
-            : [venue],
-        ...INITIAL_MARKET,
-      })),
-
-    setSelectedVenues: (selectedVenues) =>
-      set({ selectedVenues, ...INITIAL_MARKET }),
-
-    setMarketType: (marketType) =>
-      set((s) => {
-        const isValidVenue = marketType === "forex"
-          ? isForexVenue(s.venue as Venue)
-          : marketType === "perpetual"
-          ? s.venue.includes("futures") || s.venue === "hyperliquid" || s.venue === "deribit"
-          : s.venue.includes("spot");
-        const newVenue = isValidVenue 
-          ? s.venue 
-          : (marketType === "forex" ? "finnhub-forex" : marketType === "perpetual" ? "bybit-futures" : "bybit-spot");
-        return {
-          marketType,
-          venue: newVenue as VenueSelection,
-          selectedVenues: [newVenue as Venue],
-          tickSize: marketType === "forex" ? 0.00001 : s.tickSize,
+      setVenue: (venue) =>
+        set((s) => ({
+          venue,
+          selectedVenues:
+            venue === "all-perps" || venue === "all-spot" ? s.selectedVenues : [venue],
+          orderBookMode: venue === "all-perps" || venue === "all-spot" ? "aggregated" : "single",
           ...INITIAL_MARKET,
-        };
-      }),
+        })),
 
-    setTimeframe: (timeframe) =>
-      set({ timeframe, ...INITIAL_MARKET }),
+      setSelectedVenues: (selectedVenues) => set({ selectedVenues, ...INITIAL_MARKET }),
 
-    setToolProfile: (toolProfile) =>
-      set({ toolProfile, panels: PROFILE_PANELS[toolProfile] }),
+      setMarketType: (marketType) =>
+        set((s) => {
+          const isValidVenue =
+            marketType === "forex"
+              ? isForexVenue(s.venue as Venue)
+              : marketType === "perpetual"
+                ? s.venue.includes("futures") || s.venue === "hyperliquid" || s.venue === "deribit" || s.venue === "all-perps"
+                : s.venue.includes("spot");
+          const newVenue = isValidVenue
+            ? s.venue
+            : marketType === "forex"
+              ? "finnhub-forex"
+              : marketType === "perpetual"
+                ? "bybit-futures"
+                : "bybit-spot";
+          return {
+            marketType,
+            venue: newVenue as VenueSelection,
+            selectedVenues: isValidVenue ? s.selectedVenues : [newVenue as Venue],
+            orderBookMode: isValidVenue ? s.orderBookMode : "single",
+            ...INITIAL_MARKET,
+          };
+        }),
 
-    setTickSize: (tickSize) => set({ tickSize }),
+      setTimeframe: (timeframe) => set({ timeframe, ...INITIAL_MARKET }),
 
-    setImbalanceThreshold: (imbalanceThreshold) =>
-      set({ imbalanceThreshold }),
+      setTickSize: (tickSize) => set({ tickSize }),
 
-    setOrderBookMode: (orderBookMode) => set({ orderBookMode }),
+      setImbalanceThreshold: (imbalanceThreshold) => set({ imbalanceThreshold }),
 
-    setPanelVisible: (panel, visible) =>
-      set((s) => ({
-        panels: { ...s.panels, [panel]: visible },
-      })),
+      setOrderBookMode: (orderBookMode) => set({ orderBookMode }),
 
-    setTheme: (theme) => {
-      applyTheme(theme);
-      set({ theme });
-    },
+      setValueAreaPct: (valueAreaPct) => set({ valueAreaPct }),
 
-    // --- Market Data ---
-    pushTrade: (trade) =>
-      set(() => {
-        recentTradeBuffer.push(trade);
-        return { recentTrades: recentTradeBuffer.newestFirst() };
-      }),
+      finalizeCandle: (candle) =>
+        set((s) => ({
+          candles: [...s.candles, { ...candle, complete: true }].slice(-MAX_CANDLES),
+          currentCandle: null,
+        })),
 
-    updateOrderBook: (book) =>
-      set({ orderBook: book }),
+      updateConnection: (conn) =>
+        set((s) => ({ connections: { ...s.connections, [conn.venue]: conn } })),
 
-    updateAggregatedBook: (aggregatedBook) =>
-      set({ aggregatedBook }),
+      applyMarketDataBatch: (batch) =>
+        set((s) => {
+          for (const trade of batch.trades) recentTradeBuffer.push(trade);
+          return {
+            recentTrades: batch.trades.length ? recentTradeBuffer.newestFirst() : s.recentTrades,
+            orderBook: batch.orderBook ?? s.orderBook,
+            aggregatedBook: batch.aggregatedBook ?? s.aggregatedBook,
+            currentCandle: batch.candle ?? s.currentCandle,
+            volumeProfile: batch.volumeProfile ?? s.volumeProfile,
+            ticker: batch.ticker ?? s.ticker,
+            currentOBI: batch.obi?.value ?? s.currentOBI,
+            obiHistory: batch.obi ? [...s.obiHistory, batch.obi].slice(-MAX_OBI_POINTS) : s.obiHistory,
+            flowBars: batch.flowBars.length
+              ? [...s.flowBars, ...batch.flowBars].slice(-MAX_FLOW_BARS)
+              : s.flowBars,
+            liveBar: batch.liveBar ?? s.liveBar,
+            session: batch.session ?? s.session,
+            connections: batch.connections.length
+              ? {
+                  ...s.connections,
+                  ...Object.fromEntries(batch.connections.map((c) => [c.venue, c])),
+                }
+              : s.connections,
+          };
+        }),
 
-    updateCurrentCandle: (candle) =>
-      set({ currentCandle: candle }),
+      setCrosshair: (crosshairTime, crosshairPrice) => set({ crosshairTime, crosshairPrice }),
 
-    finalizeCandle: (candle) =>
-      set((s) => ({
-        candles: [...s.candles, { ...candle, complete: true }].slice(-500),
-        currentCandle: null,
-      })),
-
-    setVolumeProfile: (vp) => set({ volumeProfile: vp }),
-
-    pushOBI: (snap) =>
-      set((s) => ({
-        currentOBI: snap.value,
-        obiHistory: [...s.obiHistory, snap].slice(-300),
-      })),
-
-    pushZScore: (z) =>
-      set((s) => ({
-        zScoreHistory: [...s.zScoreHistory, z].slice(-500),
-      })),
-
-    updateConnection: (conn) =>
-      set((s) => ({
-        connections: { ...s.connections, [conn.venue]: conn },
-      })),
-
-    updateTicker: (ticker) => set({ ticker }),
-
-    applyMarketDataBatch: (batch) =>
-      set((s) => {
-        for (const trade of batch.trades) recentTradeBuffer.push(trade);
-        return {
-          recentTrades: batch.trades.length
-            ? recentTradeBuffer.newestFirst()
-            : s.recentTrades,
-          orderBook: batch.orderBook ?? s.orderBook,
-          aggregatedBook: batch.aggregatedBook ?? s.aggregatedBook,
-          currentCandle: batch.candle ?? s.currentCandle,
-          volumeProfile: batch.volumeProfile ?? s.volumeProfile,
-          ticker: batch.ticker ?? s.ticker,
-          currentOBI: batch.obi?.value ?? s.currentOBI,
-          obiHistory: batch.obi
-            ? [...s.obiHistory, batch.obi].slice(-300)
-            : s.obiHistory,
-          zScoreHistory: batch.zScores.length
-            ? [...s.zScoreHistory, ...batch.zScores].slice(-500)
-            : s.zScoreHistory,
-          connections: batch.connections.length
-            ? {
-                ...s.connections,
-                ...Object.fromEntries(batch.connections.map((connection) => [connection.venue, connection])),
-              }
-            : s.connections,
-        };
-      }),
-
-    setCrosshair: (crosshairTime, crosshairPrice) =>
-      set({ crosshairTime, crosshairPrice }),
-
-    resetMarketData: () => {
-      recentTradeBuffer.clear();
-      set(INITIAL_MARKET);
-    },
-  }))
+      resetMarketData: () => {
+        recentTradeBuffer.clear();
+        set(INITIAL_MARKET);
+      },
+    }))
   );
 };
