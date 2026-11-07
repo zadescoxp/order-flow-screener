@@ -12,6 +12,18 @@ import type {
 import { FinnhubForexAdapter } from "./forex";
 
 // ─── Helpers ─────────────────────────────────────────────────
+type DeribitLevel = [number, number] | [string, number, number];
+
+/** Apply [price, size, ...] deltas to a book side; a size of 0 removes the level. */
+function applyLevels(side: Map<number, number>, levels: ReadonlyArray<ReadonlyArray<string>>, multiplier: number) {
+  for (const level of levels) {
+    const price = parseFloat(level[0]);
+    const qty = parseFloat(level[1]) * multiplier;
+    if (!Number.isFinite(price)) continue;
+    if (!(qty > 0)) side.delete(price);
+    else side.set(price, qty);
+  }
+}
 function emitBook(
   adapter: BaseExchangeAdapter & { venue: Venue; symbol: string },
   bidsMap: Map<number, number>,
@@ -61,6 +73,8 @@ export class BybitFuturesAdapter extends BaseExchangeAdapter {
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
+      // Any message after a transient error means the feed has recovered.
+      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
       try { const m = JSON.parse(e.data as string); if (m.op === "pong") return; if (m.topic) this.handleMessage(m); } catch { /**/ }
     };
     this.ws.onerror = () => this.setStatus("error");
@@ -126,6 +140,8 @@ export class BybitSpotAdapter extends BaseExchangeAdapter {
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
+      // Any message after a transient error means the feed has recovered.
+      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
       try { const m = JSON.parse(e.data as string); if (m.op === "pong") return; if (m.topic) this.handleMessage(m); } catch { /**/ }
     };
     this.ws.onerror = () => this.setStatus("error");
@@ -201,6 +217,8 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
+      // Any message after a transient error means the feed has recovered.
+      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
       try {
         const raw = e.data as string;
         if (raw === "pong") return;
@@ -222,12 +240,14 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
         this.emitTrade({ id: `okx-${t.tradeId}`, venue: this.venue, symbol: t.instId, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side, marketType: "perpetual" });
       }
     } else if (msg.arg.channel === "books") {
+      // OKX sends one "snapshot" followed by incremental "update" messages;
+      // a size of 0 removes the level.
+      if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
       for (const d of msg.data as Array<{ bids: [string, string, string, string][]; asks: [string, string, string, string][]; ts: string }>) {
-        this.bids.clear(); this.asks.clear();
-        for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q) * this.contractValue; if (qty > 0) this.bids.set(price, qty); }
-        for (const [p, q] of d.asks) { const price = parseFloat(p), qty = parseFloat(q) * this.contractValue; if (qty > 0) this.asks.set(price, qty); }
-        emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
+        applyLevels(this.bids, d.bids, this.contractValue);
+        applyLevels(this.asks, d.asks, this.contractValue);
       }
+      emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
     }
   }
 
@@ -286,6 +306,8 @@ export class OKXSpotAdapter extends BaseExchangeAdapter {
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
+      // Any message after a transient error means the feed has recovered.
+      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
       try {
         const raw = e.data as string;
         if (raw === "pong") return;
@@ -307,12 +329,12 @@ export class OKXSpotAdapter extends BaseExchangeAdapter {
         this.emitTrade({ id: `okxs-${t.tradeId}`, venue: this.venue, symbol: t.instId, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side, marketType: "spot" });
       }
     } else if (msg.arg.channel === "books") {
+      if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
       for (const d of msg.data as Array<{ bids: [string, string, string, string][]; asks: [string, string, string, string][]; ts: string }>) {
-        this.bids.clear(); this.asks.clear();
-        for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
-        for (const [p, q] of d.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(price, qty); }
-        emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
+        applyLevels(this.bids, d.bids, 1);
+        applyLevels(this.asks, d.asks, 1);
       }
+      emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
     }
   }
 
@@ -347,6 +369,8 @@ export class BinanceSpotAdapter extends BaseExchangeAdapter {
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
+      // Any message after a transient error means the feed has recovered.
+      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
       try { this.handleMessage(JSON.parse(e.data as string)); } catch { /**/ }
     };
     this.ws.onerror = () => this.setStatus("error");
@@ -405,6 +429,8 @@ export class HyperliquidAdapter extends BaseExchangeAdapter {
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
+      // Any message after a transient error means the feed has recovered.
+      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
       try { this.handleMessage(JSON.parse(e.data as string)); } catch { /**/ }
     };
     this.ws.onerror = () => this.setStatus("error");
@@ -466,6 +492,8 @@ export class BitgetFuturesAdapter extends BaseExchangeAdapter {
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
+      // Any message after a transient error means the feed has recovered.
+      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
       try {
         const raw = e.data as string;
         if (raw === "pong") return;
@@ -528,6 +556,8 @@ export class BitgetSpotAdapter extends BaseExchangeAdapter {
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
+      // Any message after a transient error means the feed has recovered.
+      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
       try {
         const raw = e.data as string;
         if (raw === "pong") return;
@@ -600,6 +630,8 @@ export class CoinbaseSpotAdapter extends BaseExchangeAdapter {
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
+      // Any message after a transient error means the feed has recovered.
+      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
       try { this.handleMessage(JSON.parse(e.data as string)); } catch { /**/ }
     };
     this.ws.onerror = () => this.setStatus("error");
@@ -671,6 +703,8 @@ export class DeribitAdapter extends BaseExchangeAdapter {
     };
     this.ws.onmessage = (e: MessageEvent) => {
       this.lastHeartbeat = Date.now();
+      // Any message after a transient error means the feed has recovered.
+      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
       try { this.handleMessage(JSON.parse(e.data as string)); } catch { /**/ }
     };
     this.ws.onerror = () => this.setStatus("error");
@@ -692,16 +726,20 @@ export class DeribitAdapter extends BaseExchangeAdapter {
         this.emitTrade({ id: `db-${t.trade_id}`, venue: this.venue, symbol: t.instrument_name, timestamp: t.timestamp, localTimestamp: Date.now(), price: t.price, quantity, quoteVolume: t.price * quantity, side: t.direction, marketType: "perpetual" });
       }
     } else if (channel.startsWith("book.")) {
-      const d = data as { type: "snapshot" | "change"; bids: [string, number, number][]; asks: [string, number, number][] };
-      if (d.type === "snapshot") { this.bids.clear(); this.asks.clear(); }
-      // Deribit book format: ["new"|"change"|"delete", price, amount]
-      for (const [action, price, amount] of d.bids) {
-        const quantity = amount / price;
-        if (action === "delete" || amount === 0) this.bids.delete(price); else this.bids.set(price, quantity);
-      }
-      for (const [action, price, amount] of d.asks) {
-        const quantity = amount / price;
-        if (action === "delete" || amount === 0) this.asks.delete(price); else this.asks.set(price, quantity);
+      // Grouped channel (book.X.none.20.100ms) sends full [price, amount] snapshots.
+      // The raw channel sends {type, [action, price, amount]} deltas. Support both.
+      const d = data as { type?: "snapshot" | "change"; bids: DeribitLevel[]; asks: DeribitLevel[] };
+      const isDelta = d.bids.concat(d.asks).some((level) => typeof level[0] === "string");
+      if (!isDelta || d.type === "snapshot") { this.bids.clear(); this.asks.clear(); }
+      for (const [side, levels] of [[this.bids, d.bids], [this.asks, d.asks]] as const) {
+        for (const level of levels) {
+          const price = Number(level.length === 3 ? level[1] : level[0]);
+          const amount = Number(level.length === 3 ? level[2] : level[1]);
+          const removed = level.length === 3 && level[0] === "delete";
+          // Inverse perpetuals quote size in USD; convert to base units.
+          if (removed || !(amount > 0) || !(price > 0)) side.delete(price);
+          else side.set(price, amount / price);
+        }
       }
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
     }
