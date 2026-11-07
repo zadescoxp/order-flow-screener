@@ -25,19 +25,31 @@ WebSocket feeds
 
 ## Features
 
+### Indicators
+
+The footprint's **Indicators** menu lets users configure, per browser:
+
+- Session VWAP, optional ±1σ / ±2σ deviation bands, and VWAP colour
+- Session POC, value area (60 / 70 / 80 %), session high / low, POC colour
+- Imbalance highlighting and ratio (2× – 4×), stacked imbalances and minimum
+  levels (2 – 5), candle POC, OHLC strip, summary rows and last-price line
+
 ### Footprint chart
 
-- Price, time, and executed-volume visualization
-- Bid volume, ask volume, total volume, and delta at each price level
-- Configurable imbalance highlighting
-- Stacked imbalance detection
-- Candle OHLC, cumulative delta, and trade count
-- Canvas rendering for efficient updates
-- Crosshair interaction and synchronized chart context
+- Contiguous tick ladder sized automatically from the instrument price
+  (≈1 bp for crypto, ≈1 pip for FX)
+- Three cell modes: Bid × Ask, Delta, and Volume
+- Per-level imbalance highlighting (≥3× by default) and stacked-imbalance bars
+- Per-candle POC outline and OHLC strip
+- Session VWAP path, session POC, VAH and VAL lines
+- Summary rows: volume, delta, cumulative delta, and trade count
+- Session volume profile attached to the same price ladder
+- Follow mode for the live candle and last price, drag/wheel pan and zoom
+- Device-pixel-ratio aware canvas rendering with synchronized crosshair
 
 ### Traded-volume heatmap
 
-- Enabled by default in the terminal
+- Enabled by default in the Liquidity workspace; toggle it from the footprint header
 - Shows the relationship between traded volume and price
 - Uses a typed-array time and price grid internally
 - Paints incremental updates to an offscreen canvas
@@ -49,23 +61,29 @@ WebSocket feeds
 The heatmap represents executed volume. It is not a resting-order-book
 visualization.
 
-### Volume and trade profiles
+### Session profile and KPI strip
 
-- Horizontal volume distribution by price
-- Total, buy, sell, and delta views
-- Point of control (POC)
-- Value area high (VAH)
-- Value area low (VAL)
-- Executed-trade distribution in the trades profile
+- Buy/sell split volume profile with value area (70%) shading and POC
+- Session statistics: last, change, high/low and range, VWAP with distance
+  and σ, POC and value area, volume and notional, delta and buy share,
+  trades per second, average and largest print, spread, OBI, realized
+  volatility, and current volume z-score
 
 ### Order book
 
-- Live bid and ask levels
-- Cumulative depth bars
-- Spread and spread percentage
-- Single, aggregated, and compact display modes
-- Bid and ask visual separation
-- Hover details for individual levels
+- Price ladder with per-level size bars and cumulative depth shading
+- Consolidated (multi-venue) or primary-venue source
+- Raw or grouped price levels
+- Liquidity-wall highlighting, spread in price and basis points, microprice
+- Crossed consolidated books are labelled instead of showing a negative spread
+- Resting bid/ask balance meter
+
+### Time & sales
+
+- Newest-first tape with millisecond timestamps, tick direction and venue
+- Size filters relative to the session average print (≥2×, ≥5×, ≥10×)
+- Block prints highlighted by size
+- Aggressor buy/sell split over recent prints
 
 ### Order book imbalance
 
@@ -79,19 +97,39 @@ The value ranges from -1 to +1. Positive values indicate greater bid
 liquidity, negative values indicate greater ask liquidity, and zero indicates
 balance.
 
-### Depth of market
+### Market depth
 
-- Cumulative bid and ask depth curves
-- Mid-price reference
+- Cumulative bid and ask step curves on a symmetric window around the mid
+- Resting size within ±10 bp and bid/ask ratios at 10 bp and 25 bp
 - Crosshair price inspection
-- Live updates from the normalized order book
 
-### Volatility and volume analytics
+### Cumulative delta
 
-- Rolling z-score visualization
-- Configurable analysis windows
-- Price-movement-based volatility input for Forex data
-- Volume-based z-score input for crypto data
+- Session CVD at 1s/5s/15s/1m resolution with price overlay
+- One-minute CVD and price change with a divergence flag
+
+### Volume z-score
+
+Executed volume is bucketed into fixed 1-second flow bars and resampled to the
+selected bar size. Each bar is scored against the **preceding** N bars:
+
+```text
+z = (Vₜ − mean(Vₜ₋ₙ … Vₜ₋₁)) / std(Vₜ₋ₙ … Vₜ₋₁)
+```
+
+This measures unusual participation. It is not a volatility measure. Earlier
+versions showed a per-trade quantity z-score under a "Volatility" label. That
+has been replaced by this time-bucketed volume z-score and a separate realized
+volatility study.
+
+### Realized volatility
+
+- Rolling close-to-close realized volatility from log returns of fixed time
+  bars, annualized (`RV = √(mean r²) · √(bars per year)`; 365-day year for
+  crypto, 260-day year for FX)
+- Session percentile and regime (compressed, normal, elevated, extreme)
+- ATR(14) on footprint candles, live range relative to ATR, and Parkinson
+  high-low volatility
 
 ### Workspace controls
 
@@ -100,14 +138,27 @@ balance.
 - Supported venue selection for crypto
 - Currency-pair selection for Forex
 - Timeframe selection from one minute to four hours
-- Tool profiles for order-flow, liquidity, and volatility workflows
-- Theme selection
-- Panel visibility controls
+- Workspace presets for order-flow, liquidity, and volatility workflows
+- Theme selection (persisted in the browser)
+- Panel visibility menu (persisted in the browser)
 - Pointer-based panel resizing from visible borders
 - Responsive single-column layout on smaller screens
 - First-visit bug-report dialog with issue and direct-message options
 
 ## Supported markets
+
+### Crypto instruments
+
+29 USDT pairs: BTC, ETH, XRP, BNB, SOL, DOGE, TRX, ADA, HYPE, LINK, SUI, AVAX,
+BCH, LTC, DOT, UNI, NEAR, APT, AAVE, ETC, ENA, ATOM, ARB, OP, INJ, FIL, SEI,
+TIA and WIF. Each is listed on Binance, Bybit, OKX, Bitget and Hyperliquid
+(perpetual and spot where applicable) and Coinbase spot (except TRX). Deribit
+covers BTC and ETH inverse perpetuals only. When a venue does not list the
+selected coin it is left out of the aggregate automatically.
+
+Coin and exchange logos are bundled in `public/coins` and `public/venues`
+(from the MIT-licensed web3icons set). HYPE, ENA, INJ and WIF use a monogram
+badge until official marks are added.
 
 ### Crypto perpetual markets
 
@@ -156,7 +207,7 @@ application therefore:
 - Classifies tick direction using price movement
 - Builds a responsive bid and ask quote proxy for the shared book pipeline
 - Derives OBI and depth visuals from that quote proxy
-- Derives Forex volatility from normalized price movement
+- Uses tick count as volume for the volume z-score ("tick volume")
 
 Forex OBI and depth should therefore be interpreted as quote-flow indicators,
 not as a complete view of all resting liquidity across the foreign-exchange
@@ -201,7 +252,12 @@ manually and add:
 
 ```bash
 NEXT_PUBLIC_FINNHUB_API_KEY=your_finnhub_api_key
+NEXT_PUBLIC_SITE_URL=https://your-domain.example
 ```
+
+`NEXT_PUBLIC_SITE_URL` sets canonical links and the absolute URLs of the
+Open Graph and X/Twitter share images (rendered from `app/opengraph-image.tsx`
+and `app/twitter-image.tsx`). On Vercel it is detected automatically.
 
 Never commit `.env.local`, API keys, or other credentials. The key is exposed
 to the browser because the Finnhub stream is opened from the client. Use a
@@ -251,11 +307,12 @@ npm run lint
 3. Select a timeframe.
 4. For Crypto, choose a spot or perpetual market and venue. Forex uses the
    internal Finnhub source automatically.
-5. Use the Flow, Liquidity, and Volatility profile controls to activate
-   relevant panels.
-6. Toggle the traded-volume Heatmap independently.
-7. Hover chart, profile, depth, and order-book elements for details.
-8. Drag a panel border when the resize handle appears to adjust its size.
+5. Pick a workspace (Order Flow, Liquidity, Volatility), then fine-tune
+   panels from the Panels menu.
+6. In the footprint, switch cell modes, toggle the session Profile and the
+   traded-volume Heatmap, and use Live (or double-click) to follow price.
+7. Hover any chart, ladder row or print for details.
+8. Drag panel borders to resize the studies dock, sidebar and sidebar panels.
 9. Use the theme selector to change the visual theme without changing
    analytical behavior.
 
@@ -271,15 +328,27 @@ app/
 
 components/
   Terminal.tsx             Main terminal shell and panel layout
-  TopBar.tsx               Market and workspace controls
-  FootprintChart.tsx       Footprint chart and traded-volume heatmap
-  OrderBook.tsx            Order-book panel
-  VolumeProfile.tsx        Volume profile
-  TradesProfile.tsx        Executed-trade profile
-  OBIPanel.tsx             Order-book imbalance chart
+  TopBar.tsx               Market, workspace and panel controls
+  MarketStatsBar.tsx       Session hero card (price and key stats)
+  FootprintChart.tsx       Footprint, session profile, VWAP and heatmap
+  OrderBook.tsx            Order-book ladder
+  OBIPanel.tsx             Order-book imbalance gauge and history
+  TimeAndSales.tsx         Time & sales tape
+  CVDPanel.tsx             Cumulative volume delta
+  VolumeZScorePanel.tsx    Volume z-score study
+  VolatilityPanel.tsx      Realized volatility, ATR and Parkinson
   DepthOfMarket.tsx        Cumulative depth chart
-  VolatilityPanel.tsx      Volatility and z-score chart
-  ui/                      Shared interface primitives
+  StatusBar.tsx            Feed health, lag and clock
+  Logo.tsx                 orderflow mark, wordmark and GitHub icon
+  AssetLogo.tsx            Coin and venue logos with monogram fallback
+  IndicatorsMenu.tsx       Footprint indicator settings
+  ui/                      Shared primitives (cards, pills, menus) and icons
+
+hooks/
+  useCanvas.ts             DPR-aware canvas hook and theme palette
+
+lib/config/
+  instruments.ts           Crypto instrument catalog and logo map
 
 lib/adapters/
   exchanges.ts             Crypto adapter factory
@@ -287,7 +356,9 @@ lib/adapters/
   capabilities.ts          Venue and symbol capability checks
 
 lib/engine/
-  orderFlowEngine.ts       Candle, footprint, volume, OBI, and z-score logic
+  orderFlowEngine.ts       Candle, footprint, volume profile and OBI logic
+  analytics.ts             Flow bars, volume z-score, realized volatility,
+                           ATR, Parkinson, session VWAP and tick sizing
 
 lib/managers/
   marketDataManager.ts     Adapter lifecycle and analytics dispatch
@@ -336,8 +407,9 @@ described in the Forex data model section.
 
 ### A panel is not visible
 
-Check the active tool profile and panel toggles. Panels can be independently
-enabled or disabled by the profile controls.
+Check the active workspace and the Panels menu. Panel choices are saved in the
+browser, so clear the `oft-ui-preferences` local-storage key to restore the
+defaults.
 
 ### The layout looks incorrect after a browser resize
 
