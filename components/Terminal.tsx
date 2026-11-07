@@ -1,29 +1,46 @@
 "use client";
 
-import React, { useRef, useCallback, useLayoutEffect } from "react";
-import { useSessionStore } from "@/lib/session/SessionContext";
+import React, { useEffect, useLayoutEffect } from "react";
 import { useMarketData } from "@/hooks/useMarketData";
-import { MarketSessionProvider } from "@/lib/session/SessionContext";
+import { MarketSessionProvider, useSessionStore } from "@/lib/session/SessionContext";
 import { useUIStore } from "@/lib/store/uiStore";
 import { applyTheme } from "@/lib/theme";
 import TopBar from "@/components/TopBar";
+import MarketStatsBar from "@/components/MarketStatsBar";
 import FootprintChart from "@/components/FootprintChart";
-import VolumeProfilePanel from "@/components/VolumeProfile";
 import OrderBookPanel from "@/components/OrderBook";
 import OBIPanel from "@/components/OBIPanel";
+import TimeAndSales from "@/components/TimeAndSales";
 import DepthOfMarket from "@/components/DepthOfMarket";
+import CVDPanel from "@/components/CVDPanel";
+import VolumeZScorePanel from "@/components/VolumeZScorePanel";
 import VolatilityPanel from "@/components/VolatilityPanel";
-import TradesProfilePanel from "@/components/TradesProfile";
 import GlobalTooltip from "@/components/GlobalTooltip";
-import ConnectionStatusBar from "@/components/ConnectionStatus";
-import type { MarketTicker, PanelVisibility } from "@/lib/types/market";
+import StatusBar from "@/components/StatusBar";
 import BugReportDialog from "@/components/BugReportDialog";
+import type { PanelVisibility } from "@/lib/types/market";
 
-// ─── Main Terminal Layout ────────────────────────────────────────
-// Flex layout for resizable panels
+// ─── Terminal shell ──────────────────────────────────────────────
+//  ┌ top bar ─────────────────────────────────────────────┐
+//  ├ KPI strip ───────────────────────────────────────────┤
+//  │ footprint + session profile        │ order book       │
+//  │                                    │ book imbalance   │
+//  ├ studies: CVD · Vol Z · RV · Depth ─┤ time & sales     │
+//  └ status bar ──────────────────────────────────────────┘
+
+const STUDIES: { key: keyof PanelVisibility; Component: React.ComponentType }[] = [
+  { key: "cvd", Component: CVDPanel },
+  { key: "volumeZ", Component: VolumeZScorePanel },
+  { key: "volatility", Component: VolatilityPanel },
+  { key: "depthOfMarket", Component: DepthOfMarket },
+];
 
 export default function Terminal() {
-  return <MarketSessionProvider><SessionTerminal /></MarketSessionProvider>;
+  return (
+    <MarketSessionProvider>
+      <SessionTerminal />
+    </MarketSessionProvider>
+  );
 }
 
 function SessionTerminal() {
@@ -31,59 +48,85 @@ function SessionTerminal() {
 
   const panels = useUIStore((s) => s.panels);
   const theme = useUIStore((s) => s.theme);
-  const [leftWidth, setLeftWidth] = React.useState(210);
-  const [rightWidth, setRightWidth] = React.useState(290);
-  const [tradesHeight, setTradesHeight] = React.useState(205);
-  const [obiHeight, setObiHeight] = React.useState(125);
+  const [sidebarWidth, setSidebarWidth] = React.useState(320);
+  const [dockHeight, setDockHeight] = React.useState(236);
+  const [obiHeight, setObiHeight] = React.useState(160);
+  const [bookShare, setBookShare] = React.useState(0.56);
+  const sidebarRef = React.useRef<HTMLElement>(null);
 
-  // Apply theme immediately before paint — directly sets CSS vars on :root
+  useEffect(() => {
+    void useUIStore.persist.rehydrate();
+  }, []);
+
   useLayoutEffect(() => {
     applyTheme(theme);
   }, [theme]);
 
+  // The value-area % is a UI preference but the profile is computed in the session.
+  const valueAreaPct = useUIStore((s) => s.indicators.valueAreaPct);
+  const setValueAreaPct = useSessionStore((s) => s.setValueAreaPct);
+  useEffect(() => setValueAreaPct(valueAreaPct), [valueAreaPct, setValueAreaPct]);
+
+  const studies = STUDIES.filter((study) => panels[study.key]);
+  const showSidebar = panels.orderBook || panels.obi || panels.timeSales;
+
   return (
-    <div className="terminal-shell">
+    <div className="terminal">
       <GlobalTooltip />
       <BugReportDialog />
       <TopBar />
-      <div className="status-strip">
-        <ConnectionStatusBar />
-      </div>
+      <MarketStatsBar />
 
-      <div className="terminal-workspace">
-        {/* ── LEFT: Volume Profile ── */}
-        {panels.volumeProfile && (
-          <div className="workspace-left" style={{ width: leftWidth }}>
-            <VolumeProfilePanel />
-            <ResizeHandle direction="right" onResize={(delta) => setLeftWidth((width) => clamp(width + delta, 150, 420))} />
+      <div className="workspace">
+        <div className="workspace-main">
+          <div className="chart-area">
+            <FootprintChart />
           </div>
-        )}
+          {studies.length > 0 && (
+            <div className="studies-dock" style={{ height: dockHeight }}>
+              <ResizeHandle direction="top" onResize={(d) => setDockHeight((h) => clamp(h - d, 180, 560))} />
+              {studies.map(({ key, Component }) => (
+                <div key={key} className="study-slot">
+                  <Component />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-        {/* ── CENTER: Footprint + Volatility + DOM ── */}
-        <CenterColumn panels={panels} />
-
-        {/* ── RIGHT: Trades Profile + OBI + Order Book ── */}
-        {panels.orderBook && (
-          <div className="workspace-right" style={{ width: rightWidth }}>
-            {panels.tradesProfile && (
-              <div className="workspace-right-section trades-section" style={{ height: tradesHeight }}>
-                <TradesProfilePanel />
-                <ResizeHandle direction="bottom" onResize={(delta) => setTradesHeight((height) => clamp(height + delta, 100, 420))} />
+        {showSidebar && (
+          <aside className="sidebar" style={{ width: sidebarWidth }} ref={sidebarRef}>
+            <ResizeHandle direction="left" onResize={(d) => setSidebarWidth((w) => clamp(w - d, 260, 520))} />
+            {panels.orderBook && (
+              <div className="sidebar-slot" style={{ flex: panels.timeSales ? `${bookShare} 1 0` : "1 1 0" }}>
+                <OrderBookPanel />
+                {panels.timeSales && (
+                  <ResizeHandle
+                    direction="bottom"
+                    onResize={(d) => {
+                      const total = sidebarRef.current?.clientHeight ?? 800;
+                      setBookShare((s) => clamp(s + d / total, 0.25, 0.8));
+                    }}
+                  />
+                )}
               </div>
             )}
             {panels.obi && (
-              <div className="workspace-right-section obi-section" style={{ height: obiHeight }}>
+              <div className="sidebar-slot" style={{ flex: `0 0 ${obiHeight}px` }}>
                 <OBIPanel />
-                <ResizeHandle direction="bottom" onResize={(delta) => setObiHeight((height) => clamp(height + delta, 70, 260))} />
+                <ResizeHandle direction="bottom" onResize={(d) => setObiHeight((h) => clamp(h + d, 140, 340))} />
               </div>
             )}
-            <div className="workspace-orderbook">
-              <OrderBookPanel />
-            </div>
-            <ResizeHandle direction="left" onResize={(delta) => setRightWidth((width) => clamp(width - delta, 220, 460))} />
-          </div>
+            {panels.timeSales && (
+              <div className="sidebar-slot" style={{ flex: panels.orderBook ? `${1 - bookShare} 1 0` : "1 1 0" }}>
+                <TimeAndSales />
+              </div>
+            )}
+          </aside>
         )}
       </div>
+
+      <StatusBar />
     </div>
   );
 }
@@ -100,16 +143,17 @@ function ResizeHandle({
   onResize: (delta: number) => void;
 }) {
   const start = React.useRef(0);
+  const vertical = direction === "top" || direction === "bottom";
   return (
     <span
       className={`resize-handle resize-handle-${direction}`}
       role="separator"
-      aria-orientation={direction === "bottom" ? "horizontal" : "vertical"}
+      aria-orientation={vertical ? "horizontal" : "vertical"}
       onPointerDown={(event) => {
         event.preventDefault();
-        start.current = direction === "bottom" || direction === "top" ? event.clientY : event.clientX;
+        start.current = vertical ? event.clientY : event.clientX;
         const move = (moveEvent: PointerEvent) => {
-          const current = direction === "bottom" || direction === "top" ? moveEvent.clientY : moveEvent.clientX;
+          const current = vertical ? moveEvent.clientY : moveEvent.clientX;
           const delta = current - start.current;
           if (delta !== 0) {
             onResize(delta);
@@ -119,154 +163,13 @@ function ResizeHandle({
         const stop = () => {
           window.removeEventListener("pointermove", move);
           window.removeEventListener("pointerup", stop);
-          document.body.classList.remove("is-resizing");
+          document.body.classList.remove("is-resizing", "is-resizing-row");
         };
         document.body.classList.add("is-resizing");
+        if (vertical) document.body.classList.add("is-resizing-row");
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", stop, { once: true });
       }}
     />
-  );
-}
-
-// ─── Center Column ───────────────────────────────────────────────
-function CenterColumn({ panels }: { panels: PanelVisibility }) {
-  const ticker = useSessionStore((s) => s.ticker);
-  const symbol = useSessionStore((s) => s.symbol);
-  const venue = useSessionStore((s) => s.venue);
-  const timeframe = useSessionStore((s) => s.timeframe);
-  const marketType = useSessionStore((s) => s.marketType);
-  const [volatilityHeight, setVolatilityHeight] = React.useState(140);
-  const [domHeight, setDomHeight] = React.useState(140);
-
-  return (
-    <div className="workspace-center">
-      <ChartHeader
-        symbol={symbol}
-        venue={venue}
-        timeframe={timeframe}
-        marketType={marketType}
-        ticker={ticker}
-      />
-
-      <div className="chart-card">
-        <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-          <FootprintChartWrapper />
-        </div>
-      </div>
-
-      {panels.volatility && (
-        <div className="workspace-bottom-panel" style={{ height: volatilityHeight }}>
-          <VolatilityPanel />
-          <ResizeHandle direction="top" onResize={(delta) => setVolatilityHeight((height) => clamp(height - delta, 90, 360))} />
-        </div>
-      )}
-
-      {panels.depthOfMarket && (
-        <div className="workspace-bottom-panel" style={{ height: domHeight }}>
-          <DepthOfMarket />
-          <ResizeHandle direction="top" onResize={(delta) => setDomHeight((height) => clamp(height - delta, 90, 360))} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Chart Header ────────────────────────────────────────────────
-function ChartHeader({
-  symbol,
-  venue,
-  timeframe,
-  marketType,
-  ticker,
-}: {
-  symbol: string;
-  venue: string;
-  timeframe: string;
-  marketType: string;
-  ticker: MarketTicker | null;
-}) {
-  const formattedVenue = venue
-    .split("-")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-  const isForex = marketType === "forex";
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "4px 10px",
-        height: 26,
-        background: "var(--bg-surface)",
-        borderBottom: "1px solid var(--border)",
-        flexShrink: 0,
-        fontSize: 11,
-      }}
-    >
-      <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>{symbol}</span>
-      <span style={{ color: "var(--text-muted)" }}>·</span>
-      <span style={{ color: "var(--text-muted)" }}>{timeframe}</span>
-      {!isForex && <><span style={{ color: "var(--text-muted)" }}>·</span>
-      <span style={{ color: "var(--text-secondary)" }}>{formattedVenue}</span></>}
-      <span style={{ color: "var(--text-muted)" }}>
-        ({marketType.charAt(0).toUpperCase() + marketType.slice(1)})
-      </span>
-
-      {ticker && (
-        <>
-          <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>
-            O{" "}
-            <span style={{ color: "var(--text-secondary)" }}>
-              {ticker.open.toFixed(1)}
-            </span>
-          </span>
-          <span style={{ color: "var(--text-muted)" }}>
-            H{" "}
-            <span style={{ color: "var(--buy)" }}>
-              {ticker.high.toFixed(1)}
-            </span>
-          </span>
-          <span style={{ color: "var(--text-muted)" }}>
-            L{" "}
-            <span style={{ color: "var(--sell)" }}>
-              {ticker.low.toFixed(1)}
-            </span>
-          </span>
-          <span style={{ color: "var(--text-muted)" }}>
-            C{" "}
-            <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-              {ticker.price.toFixed(1)}
-            </span>
-          </span>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─── Footprint Chart Wrapper ─────────────────────────────────────
-// Dynamically reads available height and passes to canvas renderer
-function FootprintChartWrapper() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = React.useState(400);
-
-  React.useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const obs = new ResizeObserver(() => {
-      setHeight(el.clientHeight);
-    });
-    obs.observe(el);
-    setHeight(el.clientHeight);
-    return () => obs.disconnect();
-  }, []);
-
-  return (
-    <div ref={containerRef} style={{ width: "100%", height: "100%" }}>
-      <FootprintChart height={height} />
-    </div>
   );
 }
