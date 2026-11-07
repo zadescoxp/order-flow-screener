@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useMarketSession, useSessionStore } from "@/lib/session/SessionContext";
 
 // ─── Hook: useMarketData ─────────────────────────────────────────
