@@ -1,5 +1,13 @@
 # Order Flow Tracker
 
+**v2.2** — resting-liquidity heatmap, absorption and iceberg markers, venues
+comparison, prior-session levels, liquidations, open interest and funding,
+alerts, replay and export:
+
+![orderflow. v2.2 terminal: resting-liquidity heatmap behind the footprint with absorption and iceberg markers, open interest, liquidations and venues studies, the alerts and indicators menus, replay and export](docs/media/orderflow-v2.2-demo.gif)
+
+**v2.1** — the redesigned terminal:
+
 ![orderflow. terminal: footprint chart with session profile and VWAP, order book, book imbalance, time & sales, cumulative delta, volume z-score and realized volatility](docs/media/orderflow-v2.1-demo.gif)
 
 Order Flow Tracker is a real-time market data terminal for studying executed
