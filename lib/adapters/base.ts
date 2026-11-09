@@ -4,9 +4,23 @@
 // ============================================================
 
 import { EventEmitter } from "events";
-import type { NormalizedTrade, NormalizedOrderBook, VenueConnection, Venue } from "@/lib/types/market";
+import type {
+  DerivativesSnapshot,
+  NormalizedLiquidation,
+  NormalizedTrade,
+  NormalizedOrderBook,
+  VenueConnection,
+  Venue,
+} from "@/lib/types/market";
 
-export type AdapterEvent = "trade" | "orderbook" | "status";
+export type AdapterEvent = "trade" | "orderbook" | "status" | "liquidation" | "derivatives";
+
+/** Parse an exchange numeric field; undefined when missing or not finite. */
+export function num(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
 
 export abstract class BaseExchangeAdapter extends EventEmitter {
   abstract readonly venue: Venue;
@@ -179,6 +193,31 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
     }
     if (bids.length === 0 || asks.length === 0) return;
     this.emit("orderbook", { ...book, bids, asks });
+  }
+
+  protected emitLiquidation(liquidation: Omit<NormalizedLiquidation, "venue" | "localTimestamp" | "quoteVolume">): void {
+    const { price, quantity, timestamp } = liquidation;
+    if (!(price > 0) || !(quantity > 0) || !Number.isFinite(timestamp)) return;
+    this.emit("liquidation", {
+      ...liquidation,
+      venue: this.venue,
+      localTimestamp: Date.now(),
+      quoteVolume: price * quantity,
+    } satisfies NormalizedLiquidation);
+  }
+
+  /** Emit a partial derivatives update; fields that failed to parse are dropped. */
+  protected emitDerivatives(update: Omit<DerivativesSnapshot, "venue" | "timestamp"> & { timestamp?: number }): void {
+    const clean: DerivativesSnapshot = { venue: this.venue, timestamp: update.timestamp ?? Date.now() };
+    let any = false;
+    for (const key of ["openInterest", "fundingRate", "fundingIntervalHours", "nextFundingTime", "markPrice", "indexPrice"] as const) {
+      const value = update[key];
+      if (value === undefined || !Number.isFinite(value)) continue;
+      if (key !== "fundingRate" && value <= 0) continue;
+      clean[key] = value;
+      any = true;
+    }
+    if (any) this.emit("derivatives", clean);
   }
 
   getStatus(): VenueConnection {

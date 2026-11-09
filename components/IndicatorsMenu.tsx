@@ -120,6 +120,10 @@ export default function IndicatorsMenu() {
           {toggle("lastPrice", "Last price line")}
         </MenuSection>
 
+        <MenuSection title="Derivatives">
+          {toggle("liquidations", "Liquidation bubbles", "Forced closes on the footprint, sized by notional (perps)")}
+        </MenuSection>
+
         <div className="menu-footer">
           <button type="button" className="ui-button chip" onClick={reset} disabled={!changed}>
             Reset to defaults

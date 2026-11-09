@@ -1,45 +1,142 @@
 // ============================================================
 // BINANCE FUTURES ADAPTER
 // Connects to Binance USD-M Futures WebSocket streams
-// Provides: normalized trades + order book depth
+// Provides: normalized trades, order book depth, liquidations,
+// funding / mark / index (markPrice stream) and open interest (REST poll).
+//
+// Binance routes USD-M market streams by category: aggTrade, markPrice
+// and forceOrder are served from /market, partial depth from /public.
+// The legacy /ws route accepts subscriptions but delivers no data.
 // ============================================================
 
-import { BaseExchangeAdapter } from "./base";
+import { BaseExchangeAdapter, num } from "./base";
 import type {
-  NormalizedTrade,
   NormalizedOrderBook,
   OrderBookLevel,
   Venue,
 } from "@/lib/types/market";
 
+const MARKET_WS = "wss://fstream.binance.com/market/ws";
+const PUBLIC_WS = "wss://fstream.binance.com/public/ws";
+const REST = "https://fapi.binance.com";
+const OI_POLL_MS = 5_000;
+
 export class BinanceFuturesAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "binance-futures";
-  private readonly BASE_WS = "wss://fstream.binance.com/ws";
   private bids = new Map<number, number>();
   private asks = new Map<number, number>();
+  private depthWs: WebSocket | null = null;
+  private depthRetry: ReturnType<typeof setTimeout> | null = null;
+  private depthAttempts = 0;
+  private oiTimer: ReturnType<typeof setInterval> | null = null;
+  private fundingIntervalHours: number | undefined;
+  private active = false;
 
   constructor(symbol: string) { super(symbol.toUpperCase()); }
-  protected buildWsUrl(): string { return this.BASE_WS; }
+  protected buildWsUrl(): string { return MARKET_WS; }
+
+  connect(): void {
+    this.active = true;
+    super.connect();
+    this.connectDepth();
+    this.startOpenInterestPolling();
+    void this.loadFundingInterval();
+  }
+
+  disconnect(): void {
+    this.active = false;
+    if (this.depthRetry) clearTimeout(this.depthRetry);
+    this.depthRetry = null;
+    if (this.oiTimer) clearInterval(this.oiTimer);
+    this.oiTimer = null;
+    const depth = this.depthWs;
+    this.depthWs = null;
+    depth?.close();
+    super.disconnect();
+  }
 
   protected subscribe(): void {
     const s = this.symbol.toLowerCase();
     this.ws?.send(JSON.stringify({
       method: "SUBSCRIBE",
-      params: [`${s}@depth20@100ms`, `${s}@aggTrade`],
+      params: [`${s}@aggTrade`, `${s}@markPrice@1s`, `${s}@forceOrder`],
       id: 1,
     }));
   }
 
+  /** Depth lives on a separate route; it reconnects independently of the main socket. */
+  private connectDepth(): void {
+    if (!this.active || typeof WebSocket === "undefined") return;
+    const ws = new WebSocket(PUBLIC_WS) as unknown as WebSocket;
+    this.depthWs = ws;
+    ws.onopen = () => {
+      this.depthAttempts = 0;
+      ws.send(JSON.stringify({ method: "SUBSCRIBE", params: [`${this.symbol.toLowerCase()}@depth20@100ms`], id: 2 }));
+    };
+    ws.onmessage = (event: MessageEvent) => {
+      try { this.handleMessage(JSON.parse(event.data as string)); } catch { /* ignore malformed frames */ }
+    };
+    ws.onclose = () => {
+      if (this.depthWs !== ws || !this.active) return;
+      this.depthWs = null;
+      const delay = Math.min(1000 * 2 ** this.depthAttempts++, 30_000);
+      this.depthRetry = setTimeout(() => { this.depthRetry = null; this.connectDepth(); }, delay);
+    };
+  }
+
+  private startOpenInterestPolling(): void {
+    if (this.oiTimer || typeof fetch === "undefined") return;
+    const poll = async () => {
+      try {
+        const response = await fetch(`${REST}/fapi/v1/openInterest?symbol=${encodeURIComponent(this.symbol)}`);
+        if (!response.ok) return;
+        const body = await response.json() as { openInterest?: string; time?: number };
+        if (this.active) this.emitDerivatives({ openInterest: num(body.openInterest), timestamp: body.time });
+      } catch { /* transient network failure — next poll retries */ }
+    };
+    void poll();
+    this.oiTimer = setInterval(poll, OI_POLL_MS);
+  }
+
+  /** Most symbols fund every 8h; some use 4h or 1h, listed in fundingInfo. */
+  private async loadFundingInterval(): Promise<void> {
+    if (typeof fetch === "undefined") return;
+    try {
+      const response = await fetch(`${REST}/fapi/v1/fundingInfo`);
+      if (!response.ok) return;
+      const list = await response.json() as Array<{ symbol: string; fundingIntervalHours?: number }>;
+      this.fundingIntervalHours = list.find((item) => item.symbol === this.symbol)?.fundingIntervalHours ?? 8;
+    } catch {
+      this.fundingIntervalHours = 8;
+    }
+  }
+
   protected handleMessage(raw: unknown): void {
-    const msg = raw as any;
+    const msg = raw as any; // eslint-disable-line @typescript-eslint/no-explicit-any
     if (msg.e === "aggTrade") {
       const price = parseFloat(msg.p), qty = parseFloat(msg.q);
       this.emitTrade({ id: `bf-${msg.a}`, venue: this.venue, symbol: msg.s, timestamp: msg.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: msg.m ? "sell" : "buy", marketType: "perpetual", sequence: msg.a });
-    } else if (msg.lastUpdateId && msg.bids && msg.asks) {
+    } else if (msg.e === "depthUpdate" || (msg.lastUpdateId && msg.bids && msg.asks)) {
+      // Partial depth: every message is a full top-N snapshot.
       this.bids.clear(); this.asks.clear();
-      for (const [p, q] of msg.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
-      for (const [p, q] of msg.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(price, qty); }
+      for (const [p, q] of msg.b ?? msg.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
+      for (const [p, q] of msg.a ?? msg.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(price, qty); }
       this.emitBook();
+    } else if (msg.e === "markPriceUpdate") {
+      this.emitDerivatives({
+        markPrice: num(msg.p),
+        indexPrice: num(msg.i),
+        fundingRate: num(msg.r),
+        nextFundingTime: num(msg.T),
+        fundingIntervalHours: this.fundingIntervalHours,
+        timestamp: num(msg.E),
+      });
+    } else if (msg.e === "forceOrder" && msg.o) {
+      const o = msg.o;
+      const price = num(o.ap) || num(o.p) || 0;
+      const quantity = num(o.z) || num(o.q) || 0;
+      // A forced SELL closes a long position.
+      this.emitLiquidation({ id: `bfl-${o.s}-${o.T}-${o.S}`, symbol: o.s, timestamp: o.T, price, quantity, side: o.S === "SELL" ? "long" : "short" });
     }
   }
 
@@ -58,7 +155,7 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
 
   protected sendPing(): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ method: "LIST_SUBSCRIPTIONS", id: 2 }));
+      this.ws.send(JSON.stringify({ method: "LIST_SUBSCRIPTIONS", id: 3 }));
     }
   }
 }

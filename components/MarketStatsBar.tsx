@@ -8,6 +8,22 @@ import { Stat } from "@/components/ui/Primitives";
 import { AssetLogo } from "@/components/AssetLogo";
 import { assetFor } from "@/lib/config/instruments";
 import { zTone } from "./VolumeZScorePanel";
+import { regimeTone } from "./OpenInterestPanel";
+import { useNow } from "@/hooks/useNow";
+import { OI_REGIME_HINT, OI_REGIME_LABEL, annualizeFunding, fundingRate8h, oiWindowChange, type OIWindowChange } from "@/lib/engine/derivatives";
+import type { DerivativesAggregate } from "@/lib/types/market";
+
+const REGIME_WINDOW_MS = 5 * 60_000;
+
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return [h, m, s].map((n) => n.toString().padStart(2, "0")).join(":");
+}
+
+const pct = (rate: number, digits = 4) => (rate >= 0 ? "+" : "") + (rate * 100).toFixed(digits) + "%";
 
 // ─── Market KPI strip ────────────────────────────────────────────
 // Session-level read-outs derived from the same normalized stream
@@ -23,6 +39,12 @@ export default function MarketStatsBar() {
   const marketType = useSessionStore((s) => s.marketType);
   const symbol = useSessionStore((s) => s.symbol);
   const venue = useSessionStore((s) => s.venue);
+  const derivatives = useSessionStore((s) => s.derivatives);
+  const oiHistory = useSessionStore((s) => s.oiHistory);
+  const selectedVenues = useSessionStore((s) => s.selectedVenues);
+  const isPerp = marketType === "perpetual";
+  const now = useNow(1000);
+  const oiChange = useMemo(() => (isPerp ? oiWindowChange(oiHistory, REGIME_WINDOW_MS) : null), [isPerp, oiHistory]);
 
   const studies = useMemo(() => {
     const bars = liveBar ? [...flowBars, liveBar] : flowBars;
@@ -100,7 +122,76 @@ export default function MarketStatsBar() {
           tone={zTone(studies.z)}
           title="Volume in the current 5-second bar versus the previous 20 bars"
         />
+        {isPerp && <DerivativesStats derivatives={derivatives} oiChange={oiChange} now={now} base={base} multiVenue={selectedVenues.length > 1} />}
       </div>
     </section>
+  );
+}
+
+function DerivativesStats({
+  derivatives: d,
+  oiChange,
+  now,
+  base,
+  multiVenue,
+}: {
+  derivatives: DerivativesAggregate | null;
+  oiChange: OIWindowChange | null;
+  now: number;
+  base: string;
+  multiVenue: boolean;
+}) {
+  // A single venue shows its native funding rate; an aggregate shows the OI-weighted 8h-equivalent.
+  const fundingRate = multiVenue ? d?.fundingRate8h ?? null : d?.primaryFundingRate ?? null;
+  const fundingHours = multiVenue ? 8 : d?.fundingIntervalHours ?? 8;
+  const fundingTone = fundingRate === null ? undefined : fundingRate > 0 ? "buy" : fundingRate < 0 ? "sell" : "muted";
+  const countdown = d?.nextFundingTime && now ? formatCountdown(d.nextFundingTime - now) : null;
+  const perVenue = (d?.venues ?? []).flatMap((v) => {
+    const rate = fundingRate8h(v);
+    if (rate === undefined) return [];
+    const label = VENUE_LABEL[v.venue] ?? v.venue;
+    return [`${label}: ${pct(v.fundingRate ?? 0)} / ${v.fundingIntervalHours ?? 8}h (${pct(rate)} 8h)`];
+  });
+  const oiPerVenue = (d?.venues ?? []).flatMap((v) =>
+    v.openInterest === undefined ? [] : [`${VENUE_LABEL[v.venue] ?? v.venue}: ${formatCompact(v.openInterest, 2)} ${base}`]
+  );
+  const regime = oiChange?.regime;
+  const nl = String.fromCharCode(10);
+
+  return (
+    <>
+      <Stat
+        label="Open interest"
+        value={d?.openInterestValue ? `$${formatCompact(d.openInterestValue, 2)}` : "—"}
+        sub={d?.openInterest ? `${formatCompact(d.openInterest, 2)} ${base}${oiChange ? ` · ${formatPercent(oiChange.oiChange * 100, 2)} 5m` : ""}` : undefined}
+        tone="accent"
+        title={["Open contracts (base units × mark price)", ...oiPerVenue].join(nl)}
+      />
+      <Stat
+        label={multiVenue ? "Funding (8h avg)" : `Funding / ${fundingHours}h`}
+        value={fundingRate === null ? "—" : pct(fundingRate)}
+        sub={
+          fundingRate === null
+            ? undefined
+            : `${countdown ? `next ${countdown}` : d?.nextFundingTime ? "next —" : "continuous"} · ${formatPercent(annualizeFunding(fundingRate, fundingHours) * 100, 1)} APR`
+        }
+        tone={fundingTone}
+        title={["Positive funding: longs pay shorts. Negative: shorts pay longs.", ...perVenue].join(nl)}
+      />
+      <Stat
+        label="Basis"
+        value={d?.basisBps == null ? "—" : `${d.basisBps >= 0 ? "+" : ""}${d.basisBps.toFixed(1)} bp`}
+        sub={d?.markPrice && d.indexPrice ? "mark vs index" : undefined}
+        tone={d?.basisBps == null ? undefined : d.basisBps >= 0 ? "buy" : "sell"}
+        title="Perpetual mark price relative to the venue's spot index. Positive: the perp trades at a premium."
+      />
+      <Stat
+        label="Positioning"
+        value={regime ? OI_REGIME_LABEL[regime] : "—"}
+        sub={oiChange ? `px ${formatPercent(oiChange.priceChange * 100, 2)} · OI ${formatPercent(oiChange.oiChange * 100, 2)}` : "5m price × OI"}
+        tone={regimeTone(regime)}
+        title={regime ? OI_REGIME_HINT[regime] : "Joint 5-minute move of price and open interest"}
+      />
+    </>
   );
 }

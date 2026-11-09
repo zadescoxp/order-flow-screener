@@ -39,6 +39,8 @@ const PANEL_ITEMS: { key: keyof PanelVisibility; label: string; hint: string; gr
   { key: "heatmap", label: "Traded-volume heatmap", hint: "Executed volume by price", group: "Chart" },
   { key: "cvd", label: "Cumulative delta", hint: "CVD with price overlay", group: "Studies" },
   { key: "volumeZ", label: "Volume z-score", hint: "Unusual participation", group: "Studies" },
+  { key: "openInterest", label: "Open interest", hint: "OI with price and regime (perps)", group: "Studies" },
+  { key: "liquidations", label: "Liquidations", hint: "Forced longs / shorts per bucket (perps)", group: "Studies" },
   { key: "volatility", label: "Realized volatility", hint: "RV, ATR, Parkinson", group: "Studies" },
   { key: "depthOfMarket", label: "Market depth", hint: "Cumulative liquidity curve", group: "Studies" },
   { key: "orderBook", label: "Order book", hint: "Price ladder", group: "Sidebar" },

@@ -35,6 +35,7 @@ The footprint's **Indicators** menu lets users configure, per browser:
 - Session POC, value area (60 / 70 / 80 %), session high / low, POC colour
 - Imbalance highlighting and ratio (2× – 4×), stacked imbalances and minimum
   levels (2 – 5), candle POC, OHLC strip, summary rows and last-price line
+- Liquidation bubbles on the footprint (perpetuals)
 
 ### Footprint chart
 
@@ -46,6 +47,8 @@ The footprint's **Indicators** menu lets users configure, per browser:
 - Session VWAP path, session POC, VAH and VAL lines
 - Summary rows: volume, delta, cumulative delta, and trade count
 - Session volume profile attached to the same price ladder
+- Liquidation bubbles at the liquidation price and time, sized by notional
+  (red: longs liquidated, green: shorts liquidated)
 - Follow mode for the live candle and last price, drag/wheel pan and zoom
 - Device-pixel-ratio aware canvas rendering with synchronized crosshair
 
@@ -70,6 +73,9 @@ visualization.
   and σ, POC and value area, volume and notional, delta and buy share,
   trades per second, average and largest print, spread, OBI, realized
   volatility, and current volume z-score
+- Perpetuals only: open interest (notional, base units, 5-minute change),
+  funding rate with countdown to the next settlement and annualized rate,
+  mark-vs-index basis, and the price × open-interest positioning regime
 
 ### Order book
 
@@ -86,6 +92,8 @@ visualization.
 - Size filters relative to the session average print (≥2×, ≥5×, ≥10×)
 - Block prints highlighted by size
 - Aggressor buy/sell split over recent prints
+- Liquidations interleaved as tagged rows (`LIQ L` / `LIQ S`), with a
+  liquidations-only filter on perpetual markets
 
 ### Order book imbalance
 
@@ -132,6 +140,56 @@ volatility study.
 - Session percentile and regime (compressed, normal, elevated, extreme)
 - ATR(14) on footprint candles, live range relative to ATR, and Parkinson
   high-low volatility
+
+### Liquidations (perpetuals)
+
+Forced closes from the venues that publish a public liquidation stream:
+Binance, Bybit, OKX and Deribit. Bitget and Hyperliquid do not publish one,
+and the panel lists them as having no feed.
+
+- Long liquidations (forced sells) above the zero line, short liquidations
+  (forced buys) below, in quote notional per 15s / 1m / 5m bucket
+- Price overlay, 5-minute long and short totals and the largest liquidation
+- Quiet / Active / Cascade state; a cascade is a latest bucket at least 5× the
+  median non-empty bucket
+- Records older than 60 seconds on arrival (OKX replays its last known
+  liquidation) and duplicates are discarded
+
+### Open interest, funding and basis (perpetuals)
+
+- Open interest summed across the selected perpetual venues, sampled once a
+  second, with price overlay. The set of summed venues is fixed once every
+  venue has reported (or after 15 seconds), so a slow venue does not add a
+  step to the series
+- Funding: the venue's native rate and interval for a single venue; for an
+  aggregate, the open-interest-weighted rate restated to an 8-hour interval
+  (Hyperliquid funds hourly, some Binance symbols every 4 hours)
+- Basis: perpetual mark price relative to the venue's spot index, in basis
+  points
+- Positioning regime over a 1m / 5m / 15m window:
+
+| Price | Open interest | Regime |
+| --- | --- | --- |
+| Up | Up | New longs |
+| Up | Down | Short covering |
+| Down | Up | New shorts |
+| Down | Down | Long unwind |
+
+Moves under 0.05% in price or 0.1% in open interest count as flat
+("Balanced").
+
+| Venue | Open interest | Funding | Mark / index | Liquidations |
+| --- | --- | --- | --- | --- |
+| Binance | REST poll (5s) | `markPrice` stream | `markPrice` stream | `forceOrder` stream |
+| Bybit | `tickers` | `tickers` | `tickers` | `allLiquidation` |
+| OKX | `open-interest` | `funding-rate` | `mark-price`, `index-tickers` | `liquidation-orders` |
+| Bitget | `ticker` | `ticker` | `ticker` | — |
+| Hyperliquid | `activeAssetCtx` | `activeAssetCtx` (hourly) | mark / oracle price | — |
+| Deribit | `ticker` (USD, converted) | `funding_8h` | `ticker` | `liquidation` flag on trades |
+
+Binance USD-M routes streams by category: trades, mark price and liquidations
+are read from `/market/ws` and partial depth from `/public/ws`. The legacy
+`/ws` route accepts subscriptions but delivers no data.
 
 ### Workspace controls
 
@@ -339,6 +397,8 @@ components/
   CVDPanel.tsx             Cumulative volume delta
   VolumeZScorePanel.tsx    Volume z-score study
   VolatilityPanel.tsx      Realized volatility, ATR and Parkinson
+  OpenInterestPanel.tsx    Open interest, price overlay and regime
+  LiquidationsPanel.tsx    Liquidations per bucket and cascade state
   DepthOfMarket.tsx        Cumulative depth chart
   StatusBar.tsx            Feed health, lag and clock
   Logo.tsx                 orderflow mark, wordmark and GitHub icon
@@ -348,12 +408,14 @@ components/
 
 hooks/
   useCanvas.ts             DPR-aware canvas hook and theme palette
+  useNow.ts                Ticking clock for countdowns and rolling windows
 
 lib/config/
   instruments.ts           Crypto instrument catalog and logo map
 
 lib/adapters/
-  exchanges.ts             Crypto adapter factory
+  exchanges.ts             Crypto adapters and adapter factory
+  binanceFutures.ts        Binance USD-M adapter (market + public routes)
   forex.ts                 Finnhub Forex adapter
   capabilities.ts          Venue and symbol capability checks
 
@@ -361,6 +423,8 @@ lib/engine/
   orderFlowEngine.ts       Candle, footprint, volume profile and OBI logic
   analytics.ts             Flow bars, volume z-score, realized volatility,
                            ATR, Parkinson, session VWAP and tick sizing
+  derivatives.ts           Open interest, funding, basis, regime and
+                           liquidation aggregation
 
 lib/managers/
   marketDataManager.ts     Adapter lifecycle and analytics dispatch
