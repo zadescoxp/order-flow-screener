@@ -44,12 +44,13 @@ export default function RecordingsMenu() {
         className={`ui-button record-button ${recording ? "is-recording" : ""}`}
         disabled={!supported || replaying}
         onClick={() => (recording ? void session.stopRecording() : void session.startRecording())}
-        title={
+        aria-label={recording ? "Stop recording" : "Record session"}
+        data-hint={
           !supported
-            ? "Recording needs IndexedDB, which this browser doesn't provide"
+            ? "Recording isn't available in this browser"
             : recording
               ? `Stop recording · ${formatCompact(recording.events, 1)} events · ${formatBytes(recording.bytes)}`
-              : "Record the live stream (trades, book snapshots, liquidations, OI) to this browser for replay"
+              : "Record session"
         }
       >
         <Icon.Record />
@@ -59,7 +60,7 @@ export default function RecordingsMenu() {
           <span className="hide-compact">Rec</span>
         )}
       </button>
-      <Menu label={<><Icon.History /><span className="hide-compact">Replay</span></>}>
+      <Menu hint="Replay recordings" label={<><Icon.History /><span className="hide-compact">Replay</span></>}>
         <RecordingList />
       </Menu>
     </div>
@@ -125,7 +126,7 @@ function RecordingList() {
                     className="ui-button chip"
                     disabled={live || meta.events === 0}
                     onClick={() => void session.startReplay(meta)}
-                    title="Replay this session"
+                    data-hint="Replay this session"
                   >
                     <Icon.Play /> Play
                   </button>
@@ -135,7 +136,7 @@ function RecordingList() {
                     disabled={live || active}
                     onClick={() => void remove(meta)}
                     aria-label="Delete recording"
-                    title="Delete recording"
+                    data-hint="Delete recording"
                   >
                     <Icon.Close />
                   </button>

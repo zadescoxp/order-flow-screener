@@ -25,6 +25,21 @@ function applyLevels(side: Map<number, number>, levels: ReadonlyArray<ReadonlyAr
     else side.set(price, qty);
   }
 }
+/** Bitget v2 trades are objects; older payloads were [ts, price, size, side, tradeId] arrays. */
+function parseBitgetTrades(data: unknown[]): { ts: string; price: string; size: string; side: string; tradeId: string }[] {
+  return data.map((t) => {
+    if (Array.isArray(t)) {
+      const [ts, price, size, side, tradeId] = t as string[];
+      return { ts, price, size, side, tradeId: tradeId ?? ts };
+    }
+    const o = t as { ts: string; price: string; size: string; side: string; tradeId?: string };
+    return { ...o, tradeId: o.tradeId ?? o.ts };
+  });
+}
+
+/** Levels kept per side. Deep enough for the resting-liquidity heatmap. */
+export const BOOK_DEPTH = 200;
+
 function emitBook(
   adapter: BaseExchangeAdapter & { venue: Venue; symbol: string },
   bidsMap: Map<number, number>,
@@ -33,11 +48,11 @@ function emitBook(
 ) {
   const bids: OrderBookLevel[] = [...bidsMap.entries()]
     .sort((a, b) => b[0] - a[0])
-    .slice(0, 50)
+    .slice(0, BOOK_DEPTH)
     .map(([price, size]) => ({ price, size, venue: adapter.venue }));
   const asks: OrderBookLevel[] = [...asksMap.entries()]
     .sort((a, b) => a[0] - b[0])
-    .slice(0, 50)
+    .slice(0, BOOK_DEPTH)
     .map(([price, size]) => ({ price, size, venue: adapter.venue }));
   emitFn({ venue: adapter.venue, symbol: adapter.symbol, timestamp: Date.now(), localTimestamp: Date.now(), bids, asks });
 }
@@ -55,8 +70,6 @@ interface BybitDepthData {
 export class BybitFuturesAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "bybit-futures";
   private readonly BASE_WS = "wss://stream.bybit.com/v5/public/linear";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
   private lastSeq = 0;
 
   constructor(symbol: string) { super(symbol.toUpperCase()); }
@@ -69,7 +82,7 @@ export class BybitFuturesAdapter extends BaseExchangeAdapter {
       this.reconnectAttempts = 0;
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [`publicTrade.${this.symbol}`, `orderbook.50.${this.symbol}`, `tickers.${this.symbol}`, `allLiquidation.${this.symbol}`] }));
+      this.ws!.send(JSON.stringify({ op: "subscribe", args: [`publicTrade.${this.symbol}`, `orderbook.1000.${this.symbol}`, `tickers.${this.symbol}`, `allLiquidation.${this.symbol}`] }));
       this.startPing(20_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -138,8 +151,6 @@ export class BybitFuturesAdapter extends BaseExchangeAdapter {
 export class BybitSpotAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "bybit-spot";
   private readonly BASE_WS = "wss://stream.bybit.com/v5/public/spot";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
   private lastSeq = 0;
 
   constructor(symbol: string) { super(symbol.toUpperCase()); }
@@ -152,7 +163,7 @@ export class BybitSpotAdapter extends BaseExchangeAdapter {
       this.reconnectAttempts = 0;
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [`publicTrade.${this.symbol}`, `orderbook.50.${this.symbol}`] }));
+      this.ws!.send(JSON.stringify({ op: "subscribe", args: [`publicTrade.${this.symbol}`, `orderbook.200.${this.symbol}`] }));
       this.startPing(20_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -205,8 +216,6 @@ export class BybitSpotAdapter extends BaseExchangeAdapter {
 export class OKXFuturesAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "okx-futures";
   private readonly BASE_WS = "wss://ws.okx.com:8443/ws/v5/public";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
   private contractValue = 1;
 
   constructor(symbol: string) {
@@ -347,8 +356,6 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
 export class OKXSpotAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "okx-spot";
   private readonly BASE_WS = "wss://ws.okx.com:8443/ws/v5/public";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
 
   constructor(symbol: string) {
     let s = symbol.toUpperCase();
@@ -417,8 +424,6 @@ export class OKXSpotAdapter extends BaseExchangeAdapter {
 export class BinanceSpotAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "binance-spot";
   private readonly BASE_WS = "wss://stream.binance.com:9443/ws";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
 
   constructor(symbol: string) { super(symbol.toUpperCase()); }
   protected buildWsUrl(): string { return this.BASE_WS; }
@@ -471,8 +476,6 @@ export class BinanceSpotAdapter extends BaseExchangeAdapter {
 export class HyperliquidAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "hyperliquid";
   private readonly BASE_WS = "wss://api.hyperliquid.xyz/ws";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
 
   constructor(symbol: string) {
     // Accept BTCUSDT or BTC — normalize to BTC
@@ -548,8 +551,6 @@ export class HyperliquidAdapter extends BaseExchangeAdapter {
 export class BitgetFuturesAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "bitget-futures";
   private readonly BASE_WS = "wss://ws.bitget.com/v2/ws/public";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
 
   constructor(symbol: string) {
     let s = symbol.toUpperCase();
@@ -591,11 +592,11 @@ export class BitgetFuturesAdapter extends BaseExchangeAdapter {
   protected handleMessage(raw: unknown): void {
     const msg = raw as { arg: { channel: string }; action?: string; data: unknown[] };
     if (msg.arg.channel === "trade") {
-      for (const t of msg.data as Array<[string, string, string, string, string]>) {
-        // [timestamp, price, qty, side, tradeId]
-        const [ts, px, sz, side] = t;
-        const price = parseFloat(px), qty = parseFloat(sz);
-        this.emitTrade({ id: `bg-${ts}`, venue: this.venue, symbol: this.symbol, timestamp: parseInt(ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: side === "buy" ? "buy" : "sell", marketType: "perpetual" });
+      // The first push is a snapshot of recent trades; skip it so old prints don't back-date the footprint.
+      if (msg.action === "snapshot") return;
+      for (const t of parseBitgetTrades(msg.data)) {
+        const price = parseFloat(t.price), qty = parseFloat(t.size);
+        this.emitTrade({ id: `bg-${t.tradeId}`, venue: this.venue, symbol: this.symbol, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side === "buy" ? "buy" : "sell", marketType: "perpetual" });
       }
     } else if (msg.arg.channel === "ticker") {
       // holdingAmount is open interest in base units. Bitget has no public liquidation stream.
@@ -631,8 +632,6 @@ export class BitgetFuturesAdapter extends BaseExchangeAdapter {
 export class BitgetSpotAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "bitget-spot";
   private readonly BASE_WS = "wss://ws.bitget.com/v2/ws/public";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
 
   constructor(symbol: string) { super(symbol.toUpperCase()); }
   protected buildWsUrl(): string { return this.BASE_WS; }
@@ -667,10 +666,10 @@ export class BitgetSpotAdapter extends BaseExchangeAdapter {
   protected handleMessage(raw: unknown): void {
     const msg = raw as { arg: { channel: string }; action?: string; data: unknown[] };
     if (msg.arg.channel === "trade") {
-      for (const t of msg.data as Array<[string, string, string, string, string]>) {
-        const [ts, px, sz, side] = t;
-        const price = parseFloat(px), qty = parseFloat(sz);
-        this.emitTrade({ id: `bgs-${ts}`, venue: this.venue, symbol: this.symbol, timestamp: parseInt(ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: side === "buy" ? "buy" : "sell", marketType: "spot" });
+      if (msg.action === "snapshot") return;
+      for (const t of parseBitgetTrades(msg.data)) {
+        const price = parseFloat(t.price), qty = parseFloat(t.size);
+        this.emitTrade({ id: `bgs-${t.tradeId}`, venue: this.venue, symbol: this.symbol, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side === "buy" ? "buy" : "sell", marketType: "spot" });
       }
     } else if (msg.arg.channel === "books") {
       if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
@@ -694,8 +693,6 @@ export class BitgetSpotAdapter extends BaseExchangeAdapter {
 export class CoinbaseSpotAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "coinbase-spot";
   private readonly BASE_WS = "wss://advanced-trade-ws.coinbase.com";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
 
   constructor(symbol: string) {
     // BTCUSDT → BTC-USD
@@ -769,8 +766,6 @@ export class CoinbaseSpotAdapter extends BaseExchangeAdapter {
 export class DeribitAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "deribit";
   private readonly BASE_WS = "wss://www.deribit.com/ws/api/v2";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
   private reqId = 1;
 
   constructor(symbol: string) {

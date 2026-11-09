@@ -21,7 +21,9 @@ import VolumeZScorePanel from "@/components/VolumeZScorePanel";
 import VolatilityPanel from "@/components/VolatilityPanel";
 import LiquidationsPanel from "@/components/LiquidationsPanel";
 import OpenInterestPanel from "@/components/OpenInterestPanel";
+import VenuesPanel from "@/components/VenuesPanel";
 import GlobalTooltip from "@/components/GlobalTooltip";
+import HoverHint from "@/components/HoverHint";
 import StatusBar from "@/components/StatusBar";
 import BugReportDialog from "@/components/BugReportDialog";
 import type { PanelVisibility } from "@/lib/types/market";
@@ -40,6 +42,7 @@ const STUDIES: { key: keyof PanelVisibility; Component: React.ComponentType; per
   { key: "volumeZ", Component: VolumeZScorePanel },
   { key: "openInterest", Component: OpenInterestPanel, perpOnly: true },
   { key: "liquidations", Component: LiquidationsPanel, perpOnly: true },
+  { key: "venues", Component: VenuesPanel },
   { key: "volatility", Component: VolatilityPanel },
   { key: "depthOfMarket", Component: DepthOfMarket },
 ];
@@ -86,6 +89,7 @@ function SessionTerminal() {
   return (
     <div className="terminal">
       <GlobalTooltip />
+      <HoverHint />
       <BugReportDialog />
       <TopBar />
       <ReplayBar />

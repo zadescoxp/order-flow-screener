@@ -11,12 +11,31 @@ import { showTooltip, hideTooltip } from "./GlobalTooltip";
 import IndicatorsMenu from "./IndicatorsMenu";
 import { ARRIVAL_SLACK_MS } from "@/lib/engine/derivatives";
 import { imbalanceOf, stackedRuns } from "@/lib/engine/imbalance";
+import { DEPTH_CAPACITY } from "@/lib/engine/depthHistory";
+import { LiquidityHeatmapRenderer } from "@/lib/render/liquidityHeatmap";
+import type { MicroEvent } from "@/lib/engine/microstructure";
+import { useMarketSession } from "@/lib/session/SessionContext";
+import { usePriorSessions } from "@/hooks/usePriorSessions";
 import type { BigTrade, FootprintCandle, NormalizedLiquidation, VolumeProfile } from "@/lib/types/market";
 
 type Bubble =
   | { x: number; y: number; r: number; kind: "liquidation"; liq: NormalizedLiquidation }
   | { x: number; y: number; r: number; kind: "trade"; trade: BigTrade };
 const MAX_BUBBLES = 400;
+const ICE = "#7dd3fc";
+
+interface MicroHit {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  event: MicroEvent;
+}
+
+const shortDay = (day: number) => {
+  const d = new Date(day);
+  return `${(d.getUTCMonth() + 1).toString().padStart(2, "0")}/${d.getUTCDate().toString().padStart(2, "0")}`;
+};
 
 /** Index of the candle whose [openTime, closeTime] contains `time`, or -1. */
 function candleIndexAt(candles: FootprintCandle[], time: number): number {
@@ -100,6 +119,13 @@ export default function FootprintChart() {
   const marketType = useSessionStore((s) => s.marketType);
   const liquidations = useSessionStore((s) => s.liquidations);
   const bigTrades = useSessionStore((s) => s.bigTrades);
+  const microEvents = useSessionStore((s) => s.microEvents);
+  const depthVersion = useSessionStore((s) => s.depthVersion);
+  const marketSession = useMarketSession();
+  const prior = usePriorSessions();
+  const showLiquidity = useUIStore((s) => s.heatmap.restingLiquidity);
+  const [liquidity] = React.useState(() => new LiquidityHeatmapRenderer(DEPTH_CAPACITY));
+  const microRef = useRef<MicroHit[]>([]);
   const ind = useUIStore((s) => s.indicators);
   const setCrosshair = useSessionStore((s) => s.setCrosshair);
   const mode = useUIStore((s) => s.footprintMode);
@@ -129,6 +155,7 @@ export default function FootprintChart() {
       ctx.fillRect(0, 0, W, H);
       layoutRef.current = null;
       bubblesRef.current = [];
+      microRef.current = [];
       if (allCandles.length === 0) return;
 
       // ── Price ladder bounds ──
@@ -183,6 +210,15 @@ export default function FootprintChart() {
       ctx.rect(plotL, plotT, plotW, plotH);
       ctx.clip();
 
+      // ── Resting-liquidity heatmap (order-book depth over time) ──
+      // depthVersion changes when the history gains a snapshot; it is what redraws this layer.
+      if (showLiquidity && depthVersion >= 0) {
+        const history = marketSession.manager.depthHistory;
+        liquidity.update(history);
+        const firstColumn = Math.max(0, Math.floor((plotL - colX(0)) / colW) - 1);
+        liquidity.draw(ctx, history, { candles: allCandles, startIndex: firstColumn, colX, colW, plotR, priceY, rowH });
+      }
+
       // ── Traded-volume heatmap (session volume by price) ──
       if (showHeatmap && volumeProfile && volumeProfile.levels.length) {
         const sorted = volumeProfile.levels.map((l) => l.totalVolume).sort((a, b) => a - b);
@@ -230,7 +266,7 @@ export default function FootprintChart() {
         const x = colX(ci);
         if (x > plotR) break;
         if (x + colW < plotL || candle.tradeCount === 0) continue;
-        drawCandleColumn(ctx, candle, x, colW, rowH, priceY, plotT, plotB, mode, showText, showHeatmap, p, ind, pocColor);
+        drawCandleColumn(ctx, candle, x, colW, rowH, priceY, plotT, plotB, mode, showText, showHeatmap || showLiquidity, p, ind, pocColor);
 
         // Stacked imbalances — vertical bars at the column edge.
         if (ind.stackedImbalances) {
@@ -254,6 +290,30 @@ export default function FootprintChart() {
       if (ind.sessionHighLow && session) {
         sessionLines.push([session.high, p.textSecondary, 0.45], [session.low, p.textSecondary, 0.45]);
       }
+      // Prior sessions: long dashes for yesterday, fine dots for naked POCs.
+      const priorLines: [number, string, number[]][] = [];
+      if (ind.priorDay && prior.previous) {
+        priorLines.push(
+          [prior.previous.poc, withAlpha(pocColor, 0.6), [10, 5]],
+          [prior.previous.vah, withAlpha(pocColor, 0.32), [10, 5]],
+          [prior.previous.val, withAlpha(pocColor, 0.32), [10, 5]],
+          [prior.previous.vwap, withAlpha(vwapColor, 0.5), [10, 5]]
+        );
+      }
+      if (ind.nakedPocs) for (const day of prior.naked) priorLines.push([day.poc, withAlpha(pocColor, 0.5), [1.5, 3]]);
+      for (const [price, color, dash] of priorLines) {
+        const y = Math.round(priceY(price) + rowH / 2) + 0.5;
+        if (y < plotT || y > plotB) continue;
+        ctx.setLineDash(dash);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(plotL, y);
+        ctx.lineTo(plotR, y);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
       if (sessionLines.length) {
         ctx.setLineDash([5, 4]);
         ctx.lineWidth = 1;
@@ -366,6 +426,65 @@ export default function FootprintChart() {
         }
       }
       bubblesRef.current = bubbles;
+
+      // ── Absorption and iceberg markers ──
+      // Absorption: an outlined band across the candle at the level that held.
+      // Iceberg: an ice-blue diamond at the refilling level and time.
+      if ((ind.absorption || ind.icebergs) && microEvents.length) {
+        const hits: MicroHit[] = [];
+        for (let i = microEvents.length - 1; i >= 0 && hits.length < MAX_BUBBLES; i--) {
+          const ev = microEvents[i];
+          if (ev.time < firstVisible - ARRIVAL_SLACK_MS) break;
+          if (ev.kind === "absorption" ? !ind.absorption : !ind.icebergs) continue;
+          const ci = candleIndexAt(allCandles, ev.kind === "absorption" ? ev.start : ev.time);
+          if (ci < 0) continue;
+          const y = priceY(ev.price);
+          if (y + rowH < plotT || y > plotB) continue;
+          const color = ev.side === "bid" ? p.buy : p.sell;
+          if (ev.kind === "absorption") {
+            const x0 = colX(ci) + 2;
+            const w = colW - 4;
+            ctx.fillStyle = withAlpha(color, 0.1);
+            ctx.strokeStyle = withAlpha(color, 0.9);
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(x0, y + 0.5, w, rowH - 1, 3);
+            ctx.fill();
+            ctx.stroke();
+            if (rowH >= 10) {
+              ctx.font = monoFont(7.5, 700);
+              const label = "ABS";
+              const lw = ctx.measureText(label).width + 6;
+              ctx.fillStyle = color;
+              ctx.beginPath();
+              ctx.roundRect(x0 - 1, y + rowH / 2 - 5, lw, 10, 3);
+              ctx.fill();
+              ctx.fillStyle = p.light ? "#ffffff" : p.bgBase;
+              ctx.textAlign = "left";
+              ctx.fillText(label, x0 + 2, y + rowH / 2 + 0.5);
+              ctx.font = monoFont(fontSize);
+            }
+            hits.push({ x: x0, y, w, h: rowH, event: ev });
+          } else {
+            const { x } = place(ev.time, ev.price, ci);
+            const cy = y + rowH / 2;
+            const r = Math.max(4, Math.min(7, rowH * 0.38));
+            ctx.beginPath();
+            ctx.moveTo(x, cy - r);
+            ctx.lineTo(x + r, cy);
+            ctx.lineTo(x, cy + r);
+            ctx.lineTo(x - r, cy);
+            ctx.closePath();
+            ctx.fillStyle = withAlpha(ICE, 0.85);
+            ctx.fill();
+            ctx.lineWidth = 1.25;
+            ctx.strokeStyle = color;
+            ctx.stroke();
+            hits.push({ x: x - r, y: cy - r, w: r * 2, h: r * 2, event: ev });
+          }
+        }
+        microRef.current = hits;
+      }
 
       // ── Last price line ──
       const lastY = priceY(lastPrice) + rowH / 2;
@@ -480,6 +599,48 @@ export default function FootprintChart() {
           ctx.fillText(label, plotR - w / 2 - 2, y + 1);
         }
       };
+      // Prior-session levels: tagged on the axis when in view, otherwise pinned
+      // to the top or bottom edge with an arrow so they're never silently hidden.
+      const priorTags: [number, string, string][] = [];
+      if (ind.nakedPocs) for (const day of prior.naked) priorTags.push([day.poc, withAlpha(pocColor, 0.45), `nPOC ${shortDay(day.day)}`]);
+      if (ind.priorDay && prior.previous) {
+        priorTags.push(
+          [prior.previous.vah, withAlpha(pocColor, 0.4), "pVAH"],
+          [prior.previous.val, withAlpha(pocColor, 0.4), "pVAL"],
+          [prior.previous.vwap, withAlpha(vwapColor, 0.55), "pVWAP"],
+          [prior.previous.poc, withAlpha(pocColor, 0.65), "pPOC"]
+        );
+      }
+      const above: [number, string, string][] = [];
+      const below: [number, string, string][] = [];
+      for (const item of priorTags) {
+        const y = Math.round(priceY(item[0]) + rowH / 2);
+        if (y < plotT) above.push(item);
+        else if (y > plotB) below.push(item);
+        else tag(...item);
+      }
+      const edge = (items: [number, string, string][], top: boolean) => {
+        // Nearest level closest to the plot.
+        items.sort((a, b) => (top ? a[0] - b[0] : b[0] - a[0]));
+        ctx.font = monoFont(9, 700);
+        ctx.textAlign = "center";
+        items.slice(0, 5).forEach(([price, color, label], i) => {
+          const text = `${top ? "▲" : "▼"} ${label} ${formatPriceValue(price, decimals)}`;
+          const w = ctx.measureText(text).width + 12;
+          const y = top ? plotT + 6 + i * 17 : plotB - 20 - i * 17;
+          ctx.fillStyle = withAlpha(p.bgPanel, 0.85);
+          ctx.beginPath();
+          ctx.roundRect(plotR - w - 4, y, w, 15, 7.5);
+          ctx.fill();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = p.textSecondary;
+          ctx.fillText(text, plotR - w / 2 - 4, y + 8);
+        });
+      };
+      edge(above, true);
+      edge(below, false);
       if (ind.sessionPoc && volumeProfile && volumeProfile.levels.length > 2) tag(volumeProfile.poc, withAlpha(pocColor, 0.9), "POC");
       if (ind.vwap && session) tag(session.vwap, withAlpha(vwapColor, 0.9), "VWAP");
       tag(lastPrice, up ? p.buy : p.sell);
@@ -504,7 +665,7 @@ export default function FootprintChart() {
       ctx.textAlign = "center";
       ctx.fillText(`TICK ${formatPriceValue(tick, priceDecimals(tick))}`, plotR + AXIS_W / 2, HEADER_H / 2 + 1);
     },
-    [allCandles, tickSize, volumeProfile, session, ticker, mode, showProfile, showHeatmap, ind, decimals, liquidations, bigTrades, marketType]
+    [allCandles, tickSize, volumeProfile, session, ticker, mode, showProfile, showHeatmap, ind, decimals, liquidations, bigTrades, marketType, microEvents, showLiquidity, depthVersion, liquidity, marketSession, prior]
   );
 
   const { containerRef, canvasRef, redraw } = useCanvas(draw);
@@ -589,6 +750,30 @@ export default function FootprintChart() {
       return;
     }
     if (y < plotT) return hideTooltip();
+    // Microstructure markers first: they mark the reason a level matters.
+    const micro = microRef.current.find((m) => x >= m.x - 2 && x <= m.x + m.w + 2 && y >= m.y - 2 && y <= m.y + m.h + 2);
+    if (micro) {
+      const ev = micro.event;
+      setCrosshair(candle.openTime, ev.price);
+      const held = ev.side === "bid" ? "Bid held" : "Offer held";
+      showTooltip(
+        ev.kind === "absorption" ? `Absorption · ${held}` : `Iceberg · ${held}`,
+        [
+          `Price: ${formatPriceValue(ev.price, decimals)}`,
+          ev.kind === "absorption"
+            ? `Aggressive ${ev.side === "bid" ? "selling" : "buying"} at the level: ${formatCompact(ev.volume, 3)} ($${formatCompact(ev.notional, 1)}), ${ev.ratio.toFixed(1)}× an average 10 s window`
+            : `Traded into the level: ${formatCompact(ev.volume, 3)} ($${formatCompact(ev.notional, 1)}), ${ev.ratio.toFixed(1)}× its displayed size`,
+          `Window: ${formatClock(ev.start)} – ${formatClock(ev.time)}`,
+          ...(ev.venue ? [`Venue: ${VENUE_LABEL[ev.venue] ?? ev.venue}`] : []),
+          "",
+          ev.kind === "absorption"
+            ? "Heavy aggressive volume met resting orders here and price did not trade through. Heuristic: a sign of passive interest, not a guarantee."
+            : "More traded against this level than it displayed, and it kept refilling: likely hidden or replenishing size. Heuristic.",
+        ].join("\n"),
+        e
+      );
+      return;
+    }
     // Bubbles take precedence over the cell underneath; the smallest hit wins.
     let hit: Bubble | null = null;
     for (const bubble of bubblesRef.current) {
@@ -645,6 +830,12 @@ export default function FootprintChart() {
         `Delta: ${formatSigned(level.delta, 3)}`,
         `Trades: ${level.buyTrades} buy / ${level.sellTrades} sell`,
         `Largest print: ${formatCompact(level.maxTradeSize, 3)}`,
+        ...(showLiquidity
+          ? (() => {
+              const resting = LiquidityHeatmapRenderer.sizeAt(marketSession.manager.depthHistory, Math.min(candle.closeTime, Date.now()), price);
+              return resting === null ? [] : [`Resting (book, latest in candle): ${formatCompact(resting, 3)}`];
+            })()
+          : []),
         `Imbalance: ${(() => { const dir = imbalanceOf(level, ind.imbalanceRatio); return dir ? `${dir} ≥ ${ind.imbalanceRatio}×` : "none"; })()}`,
       ].join("\n"),
       e
@@ -686,6 +877,13 @@ export default function FootprintChart() {
           >
             Heatmap
           </Button>
+          <Button
+            className={`chip ${showLiquidity ? "is-active" : ""}`}
+            onClick={() => setHeatmapVisible("restingLiquidity", !showLiquidity)}
+            title="Resting-liquidity heatmap: order-book depth over time, summed across the selected venues"
+          >
+            Liquidity
+          </Button>
           <Button className="chip" onClick={resetView} title="Follow the live candle and last price (double-click chart)">
             ⟲ Live
           </Button>
@@ -696,6 +894,11 @@ export default function FootprintChart() {
           {ind.vwap && <span><i className="lg" style={{ background: ind.vwapColor ?? "var(--vwap)" }} />VWAP{ind.vwapBands ? " ±1σ ±2σ" : ""}</span>}
           {(ind.sessionPoc || ind.valueArea) && <span><i className="lg" style={{ background: ind.pocColor ?? "var(--poc)" }} />POC / VA {Math.round(ind.valueAreaPct * 100)}%</span>}
           {ind.stackedImbalances && <span><i className="lg lg-stack-buy" /><i className="lg lg-stack-sell" />Stacked ≥{ind.stackedLevels} @ {ind.imbalanceRatio}×</span>}
+          {showLiquidity && <span><i className="lg lg-depth" />Resting liquidity</span>}
+          {(ind.absorption || ind.icebergs) && (
+            <span>{ind.absorption && <><i className="lg lg-abs" />Absorption </>}{ind.icebergs && <><i className="lg lg-ice" />Iceberg</>}</span>
+          )}
+          {(ind.priorDay && prior.previous) || (ind.nakedPocs && prior.naked.length) ? <span><i className="lg lg-prior" />Prior day · naked POC</span> : null}
           {ind.bigTrades && (
             <span><i className="lg" style={{ background: "var(--buy)" }} /><i className="lg" style={{ background: "var(--sell)" }} />Big prints ≥{ind.bigTradeRatio}×</span>
           )}

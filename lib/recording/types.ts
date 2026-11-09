@@ -20,7 +20,15 @@ export type RecordedEvent =
   | [number, "t", NormalizedTrade]
   | [number, "b", NormalizedOrderBook]
   | [number, "l", NormalizedLiquidation]
-  | [number, "d", DerivativesSnapshot];
+  | [number, "d", DerivativesSnapshot]
+  | [number, "h", RecordedDepth];
+
+/** A heatmap depth snapshot: tick-bucketed sizes, as typed arrays. */
+export interface RecordedDepth {
+  tick: number;
+  index: Int32Array;
+  size: Float32Array;
+}
 
 export interface RecordingMeta {
   id: string;

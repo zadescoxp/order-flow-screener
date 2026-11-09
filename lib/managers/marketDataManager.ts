@@ -48,6 +48,9 @@ import type {
   BigTrade,
 } from "@/lib/types/market";
 import { RingBuffer } from "@/lib/session/RingBuffer";
+import { DepthHistory, bookSides, type DepthSide } from "@/lib/engine/depthHistory";
+import { AbsorptionDetector, IcebergDetector, type MicroEvent } from "@/lib/engine/microstructure";
+import { VenueTracker } from "@/lib/engine/venues";
 
 const FLOW_BAR_MS = 1000;
 const MAX_GAP_FILL_BARS = 120;
@@ -61,6 +64,8 @@ const MAX_LIQUIDATION_AGE_MS = 60_000;
 export const BIG_TRADE_MIN_RATIO = 5;
 /** Average print size needs this many trades before big-trade ratios mean anything. */
 const BIG_TRADE_WARMUP_TRADES = 50;
+/** Icebergs must trade at least this many × the average print. */
+const ICEBERG_MIN_PRINT_RATIO = 10;
 /** Executed prints kept for export (the visible tape keeps only 500). */
 export const TAPE_LOG_SIZE = 20_000;
 
@@ -71,6 +76,7 @@ export interface MarketEventSink {
   liquidation(liquidation: NormalizedLiquidation, at: number): void;
   derivatives(snapshot: DerivativesSnapshot, at: number): void;
   seed(books: NormalizedOrderBook[], derivatives: DerivativesSnapshot[], at: number): void;
+  depth(snapshot: { tick: number; index: Int32Array; size: Float32Array }, at: number): void;
   /** The market selection changed or the feed was torn down. */
   close(): void;
 }
@@ -133,7 +139,7 @@ export class MarketDataManager {
   private seenLiquidations = new Set<string>();
   private pendingOIPoints: OpenInterestPoint[] = [];
   private oiVenues: Set<Venue> | null = null;
-  private oiTimer: ReturnType<typeof setInterval> | null = null;
+  private secondTimer: ReturnType<typeof setInterval> | null = null;
   private subscribedAt = 0;
   private lastPrice = 0;
 
@@ -143,7 +149,19 @@ export class MarketDataManager {
   private recorder: MarketEventSink | null = null;
   private replaying = false;
   private replayClock = 0;
-  private lastOISample = 0;
+  private lastSecondSample = 0;
+
+  // Microstructure
+  /** One-second resting-liquidity snapshots for the heatmap (read by the footprint). */
+  readonly depthHistory = new DepthHistory();
+  private depthDirty = false;
+  private absorption = new AbsorptionDetector(0);
+  private icebergs = new IcebergDetector();
+  private pendingMicro: MicroEvent[] = [];
+  private venueTracker = new VenueTracker();
+  private venueDirty = false;
+  private lastVenueCopy = 0;
+  private lastMid = 0;
   /** Wall time when live; the replay's virtual time during a replay. */
   private clock = (): number => (this.replaying ? this.replayClock : Date.now());
 
@@ -217,9 +235,35 @@ export class MarketDataManager {
     }
 
     this.subscribedAt = Date.now();
-    if (marketType === "perpetual") {
-      this.oiTimer = setInterval(() => this.sampleOpenInterest(Date.now()), OI_SAMPLE_MS);
+    this.secondTimer = setInterval(() => this.sampleSecond(Date.now()), OI_SAMPLE_MS);
+  }
+
+  /** Once-a-second work: open interest, depth snapshot, iceberg confirmation, venue stats. */
+  private sampleSecond(now: number): void {
+    if (this.paused && !this.replaying) return;
+    if (this.currentMarketType === "perpetual") this.sampleOpenInterest(now);
+    // Live: sample each venue's full in-memory book. Replay: depth comes from recorded snapshots.
+    if (!this.replaying && this.tickResolved && this.books.size) {
+      const sides: DepthSide[] = [];
+      for (const [venue, book] of this.books) sides.push(this.adapters.get(venue)?.depthSides?.() ?? bookSides(book));
+      const mid = this.lastMid || this.lastPrice;
+      const snapshot = this.depthHistory.add(now, sides, this.currentTickSize, mid);
+      if (snapshot) {
+        this.depthDirty = true;
+        this.recorder?.depth({ tick: this.currentTickSize, index: snapshot.index, size: snapshot.size }, now);
+      }
     }
+    if (this.session && this.session.trades >= BIG_TRADE_WARMUP_TRADES) {
+      const average = this.session.volume / this.session.trades;
+      const found = this.icebergs.evaluate(this.trackTime(), average * ICEBERG_MIN_PRINT_RATIO);
+      if (found.length) this.pendingMicro.push(...found);
+    }
+    this.scheduleFlush();
+  }
+
+  /** Exchange-time "now" for detectors that compare against trade timestamps. */
+  private trackTime(): number {
+    return this.session ? Math.max(this.clock(), this.session.startTime) : this.clock();
   }
 
   // ─── Recording ─────────────────────────────────────────────────
@@ -248,7 +292,7 @@ export class MarketDataManager {
     this.disconnect();
     this.replaying = true;
     this.replayClock = startTime;
-    this.lastOISample = Math.floor(startTime / OI_SAMPLE_MS) * OI_SAMPLE_MS;
+    this.lastSecondSample = Math.floor(startTime / OI_SAMPLE_MS) * OI_SAMPLE_MS;
     this.subscribedAt = startTime;
     this.currentVenue = config.venue;
     this.currentSelectedVenues = [...config.selectedVenues];
@@ -260,25 +304,30 @@ export class MarketDataManager {
   }
 
   /** Feed one recorded event; `at` is its original arrival time. */
-  ingest(kind: "t" | "b" | "l" | "d", payload: unknown, at: number): void {
+  ingest(kind: "t" | "b" | "l" | "d" | "h", payload: unknown, at: number): void {
     if (!this.replaying) return;
     this.advanceClock(at);
+    if (kind === "h") {
+      const depth = payload as { tick: number; index: Int32Array; size: Float32Array };
+      if (this.depthHistory.addSnapshot(at, depth.index, depth.size, depth.tick)) this.depthDirty = true;
+      this.scheduleFlush();
+      return;
+    }
     if (kind === "t") this.onTrade(payload as NormalizedTrade);
     else if (kind === "b") this.onOrderBook(payload as NormalizedOrderBook);
     else if (kind === "l") this.onLiquidation(payload as NormalizedLiquidation);
     else this.onDerivatives(payload as DerivativesSnapshot);
   }
 
-  /** Move the virtual clock forward, sampling open interest on each second crossed. */
+  /** Move the virtual clock forward, running the once-a-second work for each second crossed. */
   advanceClock(time: number): void {
     if (!this.replaying || time <= this.replayClock) return;
     this.replayClock = time;
-    if (this.currentMarketType !== "perpetual") return;
     const target = Math.floor(time / OI_SAMPLE_MS) * OI_SAMPLE_MS;
     // Bound the catch-up after a long gap in the recording.
-    let next = Math.max(this.lastOISample + OI_SAMPLE_MS, target - 120 * OI_SAMPLE_MS);
-    for (; next <= target; next += OI_SAMPLE_MS) this.sampleOpenInterest(next);
-    this.lastOISample = target;
+    let next = Math.max(this.lastSecondSample + OI_SAMPLE_MS, target - 120 * OI_SAMPLE_MS);
+    for (; next <= target; next += OI_SAMPLE_MS) this.sampleSecond(next);
+    this.lastSecondSample = target;
   }
 
   /** Flush whatever is pending right away (used after a fast-forward). */
@@ -313,8 +362,16 @@ export class MarketDataManager {
     this.pendingOBI = null;
     this.pendingFlowBars = [];
     this.pendingConnections.clear();
-    if (this.oiTimer) clearInterval(this.oiTimer);
-    this.oiTimer = null;
+    if (this.secondTimer) clearInterval(this.secondTimer);
+    this.secondTimer = null;
+    this.depthHistory.clear();
+    this.depthDirty = false;
+    this.lastMid = 0;
+    this.absorption = new AbsorptionDetector(0);
+    this.icebergs.reset();
+    this.pendingMicro = [];
+    this.venueTracker.clear();
+    this.venueDirty = false;
     this.derivatives.clear();
     this.derivativesDirty = false;
     this.pendingLiquidations = [];
@@ -368,7 +425,14 @@ export class MarketDataManager {
       this.tickResolved = true;
       this.currentTickSize = resolveTickSize(trade.price, this.currentMarketType);
       if (store.tickSize !== this.currentTickSize) store.setTickSize(this.currentTickSize);
+      this.absorption.setTick(this.currentTickSize);
     }
+
+    const absorbed = this.absorption.onTrade(trade);
+    if (absorbed.length) this.pendingMicro.push(...absorbed);
+    this.icebergs.onTrade(trade, this.books.get(trade.venue));
+    this.venueTracker.onTrade(trade);
+    this.venueDirty = true;
 
     const candleOpenTime = getCandleOpenTime(trade.timestamp, this.currentTimeframe);
 
@@ -475,6 +539,7 @@ export class MarketDataManager {
     this.recorder?.book(book, this.clock());
 
     this.books.set(book.venue, book);
+    this.icebergs.onBook(book);
     const aggregate = aggregateBooks(this.books);
     if (!aggregate) return;
     const { bidVolume, askVolume } = computeBandObi(this.books, aggregate);
@@ -491,6 +556,7 @@ export class MarketDataManager {
       this.pendingOrderBook = book;
     }
     this.pendingAggregatedBook = aggregate;
+    if (aggregate.midPrice > 0) this.lastMid = aggregate.midPrice;
     this.scheduleFlush();
   }
 
@@ -585,8 +651,14 @@ export class MarketDataManager {
       liquidations: this.pendingLiquidations,
       derivatives: this.derivativesDirty ? this.computeDerivatives() : null,
       oiPoints: this.pendingOIPoints,
-      bigTrades: this.pendingBigTrades,
-      clock: this.clock(),
+        bigTrades: this.pendingBigTrades,
+        clock: this.clock(),
+      depthVersion: this.depthDirty ? this.depthHistory.version : 0,
+      microEvents: this.pendingMicro,
+      // Per-venue buckets are only worth copying when several venues are compared.
+      venueBuckets: this.venueDirty && this.currentSelectedVenues.length > 1 && this.lastVenueCopy + 1000 <= this.clock()
+        ? ((this.lastVenueCopy = this.clock()), this.venueTracker.snapshot())
+        : null,
     };
     store.applyMarketDataBatch(batch);
     this.pendingTrades = [];
@@ -602,5 +674,8 @@ export class MarketDataManager {
     this.pendingOIPoints = [];
     this.pendingBigTrades = [];
     this.derivativesDirty = false;
+    this.depthDirty = false;
+    this.pendingMicro = [];
+    if (batch.venueBuckets) this.venueDirty = false;
   }
 }

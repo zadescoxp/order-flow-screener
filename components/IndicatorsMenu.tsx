@@ -134,6 +134,16 @@ export default function IndicatorsMenu() {
           {toggle("liquidations", "Liquidations", "Forced closes, ringed, sized by notional (perps)")}
         </MenuSection>
 
+        <MenuSection title="Microstructure">
+          {toggle("absorption", "Absorption", "Heavy aggressive volume at a price that held")}
+          {toggle("icebergs", "Icebergs", "A level that kept refilling after trading through its size")}
+        </MenuSection>
+
+        <MenuSection title="Prior sessions">
+          {toggle("priorDay", "Previous day levels", "Yesterday's POC, VAH, VAL and VWAP (UTC day)")}
+          {toggle("nakedPocs", "Naked POCs", "Earlier days' POCs that price has not traded back to")}
+        </MenuSection>
+
         <div className="menu-footer">
           <button type="button" className="ui-button chip" onClick={reset} disabled={!changed}>
             Reset to defaults
