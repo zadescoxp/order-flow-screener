@@ -45,7 +45,9 @@ import type {
   DerivativesSnapshot,
   DerivativesAggregate,
   OpenInterestPoint,
+  BigTrade,
 } from "@/lib/types/market";
+import { RingBuffer } from "@/lib/session/RingBuffer";
 
 const FLOW_BAR_MS = 1000;
 const MAX_GAP_FILL_BARS = 120;
@@ -55,6 +57,32 @@ const OI_SAMPLE_MS = 1000;
 // summed series starts, so the total doesn't step up when a slow venue lands.
 const OI_LOCK_GRACE_MS = 15_000;
 const MAX_LIQUIDATION_AGE_MS = 60_000;
+/** Prints at least this many × the session average are kept as big trades. */
+export const BIG_TRADE_MIN_RATIO = 5;
+/** Average print size needs this many trades before big-trade ratios mean anything. */
+const BIG_TRADE_WARMUP_TRADES = 50;
+/** Executed prints kept for export (the visible tape keeps only 500). */
+export const TAPE_LOG_SIZE = 20_000;
+
+/** Receives every normalized event the manager accepts (used by the recorder). */
+export interface MarketEventSink {
+  trade(trade: NormalizedTrade, at: number): void;
+  book(book: NormalizedOrderBook, at: number): void;
+  liquidation(liquidation: NormalizedLiquidation, at: number): void;
+  derivatives(snapshot: DerivativesSnapshot, at: number): void;
+  seed(books: NormalizedOrderBook[], derivatives: DerivativesSnapshot[], at: number): void;
+  /** The market selection changed or the feed was torn down. */
+  close(): void;
+}
+
+export interface ReplayConfig {
+  venue: VenueSelection;
+  symbol: string;
+  marketType: MarketType;
+  timeframe: Timeframe;
+  imbalanceThreshold: number;
+  selectedVenues: Venue[];
+}
 
 export class MarketDataManager {
   private readonly store: StoreApi<TerminalStore>;
@@ -109,6 +137,16 @@ export class MarketDataManager {
   private subscribedAt = 0;
   private lastPrice = 0;
 
+  // Big trades, export log, recording and replay
+  private pendingBigTrades: BigTrade[] = [];
+  private tapeLog = new RingBuffer<NormalizedTrade>(TAPE_LOG_SIZE);
+  private recorder: MarketEventSink | null = null;
+  private replaying = false;
+  private replayClock = 0;
+  private lastOISample = 0;
+  /** Wall time when live; the replay's virtual time during a replay. */
+  private clock = (): number => (this.replaying ? this.replayClock : Date.now());
+
   constructor(store: StoreApi<TerminalStore>) {
     this.store = store;
   }
@@ -122,6 +160,8 @@ export class MarketDataManager {
     imbalanceThreshold: number,
     selectedVenues?: Venue[]
   ): void {
+    // While a recording is replaying, the live feed stays disconnected.
+    if (this.replaying) return;
     const venues = selectedVenues?.length
       ? selectedVenues
       : venuesForSelection(venue, marketType, symbol);
@@ -178,8 +218,87 @@ export class MarketDataManager {
 
     this.subscribedAt = Date.now();
     if (marketType === "perpetual") {
-      this.oiTimer = setInterval(() => this.sampleOpenInterest(), OI_SAMPLE_MS);
+      this.oiTimer = setInterval(() => this.sampleOpenInterest(Date.now()), OI_SAMPLE_MS);
     }
+  }
+
+  // ─── Recording ─────────────────────────────────────────────────
+  setRecorder(recorder: MarketEventSink | null): void {
+    this.recorder = recorder;
+    if (recorder) recorder.seed([...this.books.values()], [...this.derivatives.values()], this.clock());
+  }
+
+  get isRecording(): boolean {
+    return this.recorder !== null;
+  }
+
+  get tapeLogSize(): number {
+    return this.tapeLog.size;
+  }
+
+  /** Executed prints for export, newest first. */
+  getTapeLog(): NormalizedTrade[] {
+    return this.tapeLog.newestFirst();
+  }
+
+  // ─── Replay ────────────────────────────────────────────────────
+  /** Tear down the live feed and reset state so recorded events can be fed in. */
+  beginReplay(config: ReplayConfig, startTime: number): void {
+    this.replaying = false;
+    this.disconnect();
+    this.replaying = true;
+    this.replayClock = startTime;
+    this.lastOISample = Math.floor(startTime / OI_SAMPLE_MS) * OI_SAMPLE_MS;
+    this.subscribedAt = startTime;
+    this.currentVenue = config.venue;
+    this.currentSelectedVenues = [...config.selectedVenues];
+    this.currentSymbol = config.symbol;
+    this.currentMarketType = config.marketType;
+    this.currentTimeframe = config.timeframe;
+    this.currentImbalanceThreshold = config.imbalanceThreshold;
+    this.tickResolved = false;
+  }
+
+  /** Feed one recorded event; `at` is its original arrival time. */
+  ingest(kind: "t" | "b" | "l" | "d", payload: unknown, at: number): void {
+    if (!this.replaying) return;
+    this.advanceClock(at);
+    if (kind === "t") this.onTrade(payload as NormalizedTrade);
+    else if (kind === "b") this.onOrderBook(payload as NormalizedOrderBook);
+    else if (kind === "l") this.onLiquidation(payload as NormalizedLiquidation);
+    else this.onDerivatives(payload as DerivativesSnapshot);
+  }
+
+  /** Move the virtual clock forward, sampling open interest on each second crossed. */
+  advanceClock(time: number): void {
+    if (!this.replaying || time <= this.replayClock) return;
+    this.replayClock = time;
+    if (this.currentMarketType !== "perpetual") return;
+    const target = Math.floor(time / OI_SAMPLE_MS) * OI_SAMPLE_MS;
+    // Bound the catch-up after a long gap in the recording.
+    let next = Math.max(this.lastOISample + OI_SAMPLE_MS, target - 120 * OI_SAMPLE_MS);
+    for (; next <= target; next += OI_SAMPLE_MS) this.sampleOpenInterest(next);
+    this.lastOISample = target;
+  }
+
+  /** Flush whatever is pending right away (used after a fast-forward). */
+  flushNow(): void {
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    this.flush();
+  }
+
+  endReplay(): void {
+    if (!this.replaying) return;
+    this.disconnect();
+    this.replaying = false;
+    this.currentVenue = null;
+    this.currentSelectedVenues = [];
+    this.currentSymbol = "";
+  }
+
+  get isReplaying(): boolean {
+    return this.replaying;
   }
 
   disconnect(): void {
@@ -203,6 +322,13 @@ export class MarketDataManager {
     this.pendingOIPoints = [];
     this.oiVenues = null;
     this.lastPrice = 0;
+    this.pendingBigTrades = [];
+    this.tapeLog.clear();
+    if (this.recorder) {
+      const recorder = this.recorder;
+      this.recorder = null;
+      recorder.close();
+    }
     for (const [venue, adapter] of this.adapters) {
       const listeners = this.listeners.get(venue);
       if (listeners) {
@@ -231,8 +357,9 @@ export class MarketDataManager {
   }
 
   private onTrade(trade: NormalizedTrade): void {
-    if (this.paused) return;
+    if (this.paused && !this.replaying) return;
     if (!Number.isFinite(trade.price) || trade.price <= 0) return;
+    this.recorder?.trade(trade, this.clock());
     const store = this.store.getState();
     this.lastPrice = trade.price;
 
@@ -279,6 +406,14 @@ export class MarketDataManager {
     );
     this.currentCandleRef.vwap = this.session.vwap;
     this.currentCandleRef.vwapStd = this.session.vwapStd;
+
+    // Big prints relative to the session's average print size so far.
+    if (this.session.trades >= BIG_TRADE_WARMUP_TRADES) {
+      const average = this.session.volume / this.session.trades;
+      const ratio = average > 0 ? trade.quantity / average : 0;
+      if (ratio >= BIG_TRADE_MIN_RATIO) this.pendingBigTrades.push({ ...trade, ratio });
+    }
+    this.tapeLog.push(trade);
 
     this.updateFlowBar(trade);
 
@@ -336,7 +471,8 @@ export class MarketDataManager {
   }
 
   private onOrderBook(book: NormalizedOrderBook): void {
-    if (this.paused) return;
+    if (this.paused && !this.replaying) return;
+    this.recorder?.book(book, this.clock());
 
     this.books.set(book.venue, book);
     const aggregate = aggregateBooks(this.books);
@@ -359,22 +495,25 @@ export class MarketDataManager {
   }
 
   private onLiquidation(liquidation: NormalizedLiquidation): void {
-    if (this.paused || !this.adapters.has(liquidation.venue)) return;
+    if (!this.replaying && (this.paused || !this.adapters.has(liquidation.venue))) return;
     // Some feeds (OKX) replay the last known liquidation long after the fact,
     // and snapshot-style feeds can repeat a record; keep only fresh, unseen ones.
-    if (liquidation.timestamp < Date.now() - MAX_LIQUIDATION_AGE_MS) return;
+    if (liquidation.timestamp < this.clock() - MAX_LIQUIDATION_AGE_MS) return;
     if (this.seenLiquidations.has(liquidation.id)) return;
     this.seenLiquidations.add(liquidation.id);
     if (this.seenLiquidations.size > 10_000) {
       this.seenLiquidations = new Set([...this.seenLiquidations].slice(-5_000));
     }
+    this.recorder?.liquidation(liquidation, this.clock());
     this.pendingLiquidations.push(liquidation);
     this.scheduleFlush();
   }
 
   private onDerivatives(update: DerivativesSnapshot): void {
-    if (this.paused || !this.adapters.has(update.venue)) return;
-    this.derivatives.set(update.venue, mergeDerivatives(this.derivatives.get(update.venue), update));
+    if (!this.replaying && (this.paused || !this.adapters.has(update.venue))) return;
+    const merged = mergeDerivatives(this.derivatives.get(update.venue), update);
+    this.derivatives.set(update.venue, merged);
+    this.recorder?.derivatives(merged, this.clock());
     this.derivativesDirty = true;
     this.scheduleFlush();
   }
@@ -389,19 +528,19 @@ export class MarketDataManager {
   }
 
   /** Sample summed open interest once a second, against the last traded price. */
-  private sampleOpenInterest(): void {
-    if (this.paused || !this.lastPrice) return;
+  private sampleOpenInterest(now: number): void {
+    if ((this.paused && !this.replaying) || !this.lastPrice) return;
     const reporting = [...this.derivatives.values()].filter((s) => s.openInterest !== undefined).map((s) => s.venue);
     if (!this.oiVenues) {
       const allReported = this.currentSelectedVenues.every((v) => reporting.includes(v));
-      if (!reporting.length || (!allReported && Date.now() - this.subscribedAt < OI_LOCK_GRACE_MS)) return;
+      if (!reporting.length || (!allReported && now - this.subscribedAt < OI_LOCK_GRACE_MS)) return;
       this.oiVenues = new Set(reporting);
       this.derivativesDirty = true;
     }
     const aggregate = this.computeDerivatives();
     if (aggregate?.openInterest == null) return;
     this.pendingOIPoints.push({
-      time: Math.floor(Date.now() / OI_SAMPLE_MS) * OI_SAMPLE_MS,
+      time: Math.floor(now / OI_SAMPLE_MS) * OI_SAMPLE_MS,
       openInterest: aggregate.openInterest,
       price: this.lastPrice,
     });
@@ -418,43 +557,50 @@ export class MarketDataManager {
   }
 
   private scheduleFlush(): void {
-    if (this.flushTimer || this.paused) return;
+    if (this.flushTimer || (this.paused && !this.replaying)) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
-      const store = this.store.getState();
-      const volumeProfile =
-        this.profileDirty && this.currentCandleRef
-          ? computeVolumeProfile([...store.candles, this.currentCandleRef], store.valueAreaPct)
-          : null;
-      const batch: MarketDataBatch = {
-        trades: this.pendingTrades,
-        orderBook: this.pendingOrderBook,
-        aggregatedBook: this.pendingAggregatedBook,
-        candle: this.pendingCandle,
-        volumeProfile,
-        ticker: this.pendingTicker,
-        obi: this.pendingOBI,
-        flowBars: this.pendingFlowBars,
-        liveBar: this.liveBar ? { ...this.liveBar } : null,
-        session: this.session ? { ...this.session } : null,
-        connections: [...this.pendingConnections.values()],
-        liquidations: this.pendingLiquidations,
-        derivatives: this.derivativesDirty ? this.computeDerivatives() : null,
-        oiPoints: this.pendingOIPoints,
-      };
-      store.applyMarketDataBatch(batch);
-      this.pendingTrades = [];
-      this.pendingOrderBook = null;
-      this.pendingAggregatedBook = null;
-      this.pendingCandle = null;
-      this.profileDirty = false;
-      this.pendingTicker = null;
-      this.pendingOBI = null;
-      this.pendingFlowBars = [];
-      this.pendingConnections.clear();
-      this.pendingLiquidations = [];
-      this.pendingOIPoints = [];
-      this.derivativesDirty = false;
+      this.flush();
     }, FLUSH_INTERVAL_MS);
+  }
+
+  private flush(): void {
+    const store = this.store.getState();
+    const volumeProfile =
+      this.profileDirty && this.currentCandleRef
+        ? computeVolumeProfile([...store.candles, this.currentCandleRef], store.valueAreaPct)
+        : null;
+    const batch: MarketDataBatch = {
+      trades: this.pendingTrades,
+      orderBook: this.pendingOrderBook,
+      aggregatedBook: this.pendingAggregatedBook,
+      candle: this.pendingCandle,
+      volumeProfile,
+      ticker: this.pendingTicker,
+      obi: this.pendingOBI,
+      flowBars: this.pendingFlowBars,
+      liveBar: this.liveBar ? { ...this.liveBar } : null,
+      session: this.session ? { ...this.session } : null,
+      connections: [...this.pendingConnections.values()],
+      liquidations: this.pendingLiquidations,
+      derivatives: this.derivativesDirty ? this.computeDerivatives() : null,
+      oiPoints: this.pendingOIPoints,
+      bigTrades: this.pendingBigTrades,
+      clock: this.clock(),
+    };
+    store.applyMarketDataBatch(batch);
+    this.pendingTrades = [];
+    this.pendingOrderBook = null;
+    this.pendingAggregatedBook = null;
+    this.pendingCandle = null;
+    this.profileDirty = false;
+    this.pendingTicker = null;
+    this.pendingOBI = null;
+    this.pendingFlowBars = [];
+    this.pendingConnections.clear();
+    this.pendingLiquidations = [];
+    this.pendingOIPoints = [];
+    this.pendingBigTrades = [];
+    this.derivativesDirty = false;
   }
 }

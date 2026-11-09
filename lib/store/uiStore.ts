@@ -43,6 +43,8 @@ export interface IndicatorSettings {
   summaryRows: boolean;
   lastPrice: boolean;
   liquidations: boolean; // liquidation bubbles on the footprint (perpetuals)
+  bigTrades: boolean; // big-print bubbles on the footprint
+  bigTradeRatio: number; // 5 | 10 | 20 | 50 × the session average print
 }
 
 export const DEFAULT_INDICATORS: IndicatorSettings = {
@@ -63,6 +65,8 @@ export const DEFAULT_INDICATORS: IndicatorSettings = {
   summaryRows: true,
   lastPrice: true,
   liquidations: true,
+  bigTrades: true,
+  bigTradeRatio: 10,
 };
 
 interface UIStore {

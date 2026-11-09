@@ -23,7 +23,9 @@ import type {
   NormalizedLiquidation,
   DerivativesAggregate,
   OpenInterestPoint,
+  BigTrade,
 } from "@/lib/types/market";
+import type { RecordingStatus, ReplayStatus } from "@/lib/recording/types";
 import { RingBuffer } from "@/lib/session/RingBuffer";
 import { isForexVenue } from "@/lib/config/venues";
 
@@ -65,6 +67,8 @@ export interface MarketDataState {
   liquidations: NormalizedLiquidation[]; // oldest first
   derivatives: DerivativesAggregate | null;
   oiHistory: OpenInterestPoint[]; // 1-second samples of total open interest
+  bigTrades: BigTrade[]; // oldest first; prints ≥ BIG_TRADE_MIN_RATIO × average
+  marketClock: number; // wall time when live, virtual time during replay
   crosshairTime: number | null;
   crosshairPrice: number | null;
 }
@@ -90,7 +94,13 @@ export interface TerminalActions {
   resetMarketData: () => void;
 }
 
-export type TerminalStore = TerminalSettings & MarketDataState & TerminalActions;
+/** Recording / replay state; deliberately not part of the market-data reset. */
+export interface SessionModeState {
+  recording: RecordingStatus | null;
+  replay: ReplayStatus | null;
+}
+
+export type TerminalStore = TerminalSettings & MarketDataState & TerminalActions & SessionModeState;
 
 export interface MarketDataBatch {
   trades: NormalizedTrade[];
@@ -107,6 +117,8 @@ export interface MarketDataBatch {
   liquidations: NormalizedLiquidation[];
   derivatives: DerivativesAggregate | null;
   oiPoints: OpenInterestPoint[];
+  bigTrades: BigTrade[];
+  clock: number;
 }
 
 export const MAX_FLOW_BARS = 7200; // two hours of 1-second bars
@@ -114,6 +126,7 @@ const MAX_CANDLES = 500;
 const MAX_OBI_POINTS = 600;
 export const MAX_LIQUIDATIONS = 5000;
 export const MAX_OI_POINTS = 7200; // two hours of 1-second samples
+export const MAX_BIG_TRADES = 3000;
 
 const INITIAL_SETTINGS: TerminalSettings = {
   symbol: "BTCUSDT",
@@ -145,6 +158,8 @@ const INITIAL_MARKET: MarketDataState = {
   liquidations: [],
   derivatives: null,
   oiHistory: [],
+  bigTrades: [],
+  marketClock: 0,
   crosshairTime: null,
   crosshairPrice: null,
 };
@@ -158,6 +173,8 @@ export const createTerminalStore = () => {
     subscribeWithSelector((set) => ({
       ...INITIAL_SETTINGS,
       ...INITIAL_MARKET,
+      recording: null,
+      replay: null,
 
       setSymbol: (symbol) => set({ symbol, ...INITIAL_MARKET }),
 
@@ -239,6 +256,10 @@ export const createTerminalStore = () => {
             oiHistory: batch.oiPoints.length
               ? [...s.oiHistory, ...batch.oiPoints].slice(-MAX_OI_POINTS)
               : s.oiHistory,
+            bigTrades: batch.bigTrades.length
+              ? [...s.bigTrades, ...batch.bigTrades].slice(-MAX_BIG_TRADES)
+              : s.bigTrades,
+            marketClock: batch.clock || s.marketClock,
             connections: batch.connections.length
               ? {
                   ...s.connections,

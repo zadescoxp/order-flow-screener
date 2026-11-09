@@ -120,8 +120,18 @@ export default function IndicatorsMenu() {
           {toggle("lastPrice", "Last price line")}
         </MenuSection>
 
-        <MenuSection title="Derivatives">
-          {toggle("liquidations", "Liquidation bubbles", "Forced closes on the footprint, sized by notional (perps)")}
+        <MenuSection title="Bubbles">
+          {toggle("bigTrades", "Big prints", "Large executed trades, sized by notional")}
+          <Row label="Minimum size">
+            <Segmented
+              size="xs"
+              value={ind.bigTradeRatio}
+              onChange={(v) => set("bigTradeRatio", v)}
+              options={[5, 10, 20, 50].map((n) => ({ value: n, label: `${n}×` }))}
+              ariaLabel="Minimum big print size versus the average print"
+            />
+          </Row>
+          {toggle("liquidations", "Liquidations", "Forced closes, ringed, sized by notional (perps)")}
         </MenuSection>
 
         <div className="menu-footer">

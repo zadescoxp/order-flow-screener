@@ -35,7 +35,8 @@ The footprint's **Indicators** menu lets users configure, per browser:
 - Session POC, value area (60 / 70 / 80 %), session high / low, POC colour
 - Imbalance highlighting and ratio (2× – 4×), stacked imbalances and minimum
   levels (2 – 5), candle POC, OHLC strip, summary rows and last-price line
-- Liquidation bubbles on the footprint (perpetuals)
+- Big-print bubbles and their minimum size, and liquidation bubbles
+  (perpetuals)
 
 ### Footprint chart
 
@@ -47,8 +48,10 @@ The footprint's **Indicators** menu lets users configure, per browser:
 - Session VWAP path, session POC, VAH and VAL lines
 - Summary rows: volume, delta, cumulative delta, and trade count
 - Session volume profile attached to the same price ladder
-- Liquidation bubbles at the liquidation price and time, sized by notional
-  (red: longs liquidated, green: shorts liquidated)
+- Big-print bubbles: trades at least 5× / 10× / 20× / 50× the session's
+  average print, at their price and time, sized by notional
+- Liquidation bubbles (ringed) at the liquidation price and time, sized by
+  notional (red: longs liquidated, green: shorts liquidated)
 - Follow mode for the live candle and last price, drag/wheel pan and zoom
 - Device-pixel-ratio aware canvas rendering with synchronized crosshair
 
@@ -69,13 +72,14 @@ visualization.
 ### Session profile and KPI strip
 
 - Buy/sell split volume profile with value area (70%) shading and POC
-- Session statistics: last, change, high/low and range, VWAP with distance
-  and σ, POC and value area, volume and notional, delta and buy share,
-  trades per second, average and largest print, spread, OBI, realized
-  volatility, and current volume z-score
-- Perpetuals only: open interest (notional, base units, 5-minute change),
-  funding rate with countdown to the next settlement and annualized rate,
-  mark-vs-index basis, and the price × open-interest positioning regime
+- A single-row KPI strip: session range, VWAP (σ and distance), POC and value
+  area, delta and buy share; on perpetuals, open interest with its 5-minute
+  change and positioning regime, funding with a countdown to the next
+  settlement (annualized rate and per-venue rates in the tooltip) and
+  mark-vs-index basis; then volume, realized volatility, trades per second and
+  volume z-score
+- The strip never wraps: as it narrows, trades/s and volume z drop out first,
+  then volume, realized volatility and basis; anything still too wide scrolls
 
 ### Order book
 
@@ -190,6 +194,50 @@ Moves under 0.05% in price or 0.1% in open interest count as flat
 Binance USD-M routes streams by category: trades, mark price and liquidations
 are read from `/market/ws` and partial depth from `/public/ws`. The legacy
 `/ws` route accepts subscriptions but delivers no data.
+
+### Alerts
+
+The **Alerts** menu (bell) turns rules on per browser:
+
+| Rule | Fires when |
+| --- | --- |
+| VWAP cross | Price moves to the other side of the session VWAP |
+| Value area edge | Price crosses VAH or VAL |
+| Volume spike | A completed 5-second bar's volume z-score reaches 2σ / 3σ / 4σ |
+| Stacked imbalance | A new stack appears in the live candle (Indicators ratio and size) |
+| Block print | A print reaches 10× – 100× the session average |
+| CVD divergence | The 1-minute CVD and price change disagree in sign (both moves material) |
+| Large liquidation | A forced close of at least $100K / $250K / $1M (perpetuals) |
+
+Crossing rules wait for 50 session trades and repeat at most once per cooldown
+(10 s – 5 min). Alerts appear as toasts and in the menu's log, with an optional
+chime (Web Audio) and optional browser notifications when the terminal is not
+the focused window. With notifications on, the feed keeps running in a hidden
+tab instead of pausing.
+
+### Recording and replay
+
+- **Rec** records the live normalized stream — every trade and liquidation,
+  order-book snapshots (top 25 levels, twice a second per venue) and
+  derivatives state (once a second per venue) — to this browser's IndexedDB in
+  one-second chunks, up to two hours per recording
+- Changing the symbol, venue or timeframe ends the recording; a recording cut
+  short by closing the tab stays playable and is marked interrupted
+- **Replay** lists saved sessions; playback feeds the events back through the
+  same engine on a virtual clock at 1×, 5× or 20×, with pause, restart and
+  click-to-seek (← / → step 10 s). The live feed is disconnected and the market
+  pickers are locked until you exit
+- Recording and replay keep running in a hidden tab
+
+### Export
+
+The **Export** menu downloads:
+
+- CSV: footprint candles, footprint levels (bid / ask volume per price per
+  candle), the session profile, time & sales (last 20,000 prints),
+  liquidations and open interest — times in UTC ISO and epoch milliseconds,
+  oldest first
+- PNG: the footprint chart, or every chart panel composited into one image
 
 ### Workspace controls
 
@@ -404,11 +452,18 @@ components/
   Logo.tsx                 orderflow mark, wordmark and GitHub icon
   AssetLogo.tsx            Coin and venue logos with monogram fallback
   IndicatorsMenu.tsx       Footprint indicator settings
+  AlertsMenu.tsx           Alert rules, delivery and log
+  AlertToasts.tsx          Alert toasts
+  RecordingsMenu.tsx       Record button and saved-session list
+  ReplayBar.tsx            Replay transport (play, speed, seek, exit)
+  ExportMenu.tsx           CSV and PNG export
   ui/                      Shared primitives (cards, pills, menus) and icons
 
 hooks/
   useCanvas.ts             DPR-aware canvas hook and theme palette
   useNow.ts                Ticking clock for countdowns and rolling windows
+  useMarketNow.ts          Wall clock live, virtual clock during replay
+  useAlerts.ts             Builds alert snapshots and delivers alerts
 
 lib/config/
   instruments.ts           Crypto instrument catalog and logo map
@@ -423,6 +478,8 @@ lib/engine/
   orderFlowEngine.ts       Candle, footprint, volume profile and OBI logic
   analytics.ts             Flow bars, volume z-score, realized volatility,
                            ATR, Parkinson, session VWAP and tick sizing
+  alerts.ts                Alert monitor and CVD divergence
+  imbalance.ts             Imbalance and stacked-imbalance rules
   derivatives.ts           Open interest, funding, basis, regime and
                            liquidation aggregation
 
@@ -432,6 +489,16 @@ lib/managers/
 lib/store/
   terminalStore.ts         Session market data and terminal settings
   uiStore.ts               Shared UI settings
+  alertStore.ts            Alert settings (persisted) and log
+
+lib/recording/
+  recorder.ts              Writes the event stream to storage in chunks
+  player.ts                Replays a recording on a virtual clock
+  storage.ts               IndexedDB storage (in-memory for tests)
+
+lib/export/
+  csv.ts                   CSV builders
+  download.ts              Downloads and canvas snapshots
 
 docs/
   forex_setup.md            Forex connection and symbol details

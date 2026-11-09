@@ -9,7 +9,7 @@ import { AssetLogo } from "@/components/AssetLogo";
 import { assetFor } from "@/lib/config/instruments";
 import { zTone } from "./VolumeZScorePanel";
 import { regimeTone } from "./OpenInterestPanel";
-import { useNow } from "@/hooks/useNow";
+import { useMarketNow } from "@/hooks/useMarketNow";
 import { OI_REGIME_HINT, OI_REGIME_LABEL, annualizeFunding, fundingRate8h, oiWindowChange, type OIWindowChange } from "@/lib/engine/derivatives";
 import type { DerivativesAggregate } from "@/lib/types/market";
 
@@ -43,7 +43,7 @@ export default function MarketStatsBar() {
   const oiHistory = useSessionStore((s) => s.oiHistory);
   const selectedVenues = useSessionStore((s) => s.selectedVenues);
   const isPerp = marketType === "perpetual";
-  const now = useNow(1000);
+  const now = useMarketNow(1000);
   const oiChange = useMemo(() => (isPerp ? oiWindowChange(oiHistory, REGIME_WINDOW_MS) : null), [isPerp, oiHistory]);
 
   const studies = useMemo(() => {
@@ -87,42 +87,56 @@ export default function MarketStatsBar() {
         </span>
       </div>
       <div className="hero-stats">
-        <Stat label="Session H / L" value={session ? `${px(session.high)} / ${px(session.low)}` : "—"} sub={session ? `${rangeBp.toFixed(0)} bp range` : undefined} />
+        {/* One row. Lower-priority stats drop out as the strip narrows (see .hero-stats in globals.css). */}
+        <Stat
+          label="Range"
+          value={session ? `${rangeBp.toFixed(0)} bp` : "—"}
+          sub={session ? `${px(session.low)} – ${px(session.high)}` : undefined}
+          title={session ? `Session high ${px(session.high)} · low ${px(session.low)}` : "Session high – low"}
+        />
         <Stat
           label="VWAP"
           value={px(session?.vwap)}
-          sub={session ? `${formatPercent(vwapDist, 3)} · ${vwapSigma >= 0 ? "+" : ""}${vwapSigma.toFixed(1)}σ` : undefined}
+          sub={session ? `${vwapSigma >= 0 ? "+" : ""}${vwapSigma.toFixed(1)}σ · ${formatPercent(vwapDist, 2)}` : undefined}
           tone="vwap"
           title="Session volume-weighted average price; σ is the volume-weighted standard deviation of traded prices"
         />
         <Stat label="POC" value={px(profile?.poc)} sub={profile ? `VA ${px(profile.val)} – ${px(profile.vah)}` : undefined} tone="poc" />
-        <Stat
-          label={marketType === "forex" ? "Ticks" : "Volume"}
-          value={session ? formatCompact(session.volume) : "—"}
-          sub={session && marketType !== "forex" ? `${quote}${formatCompact(session.notional)} notional` : undefined}
-        />
         <Stat
           label="Delta"
           value={session ? formatSigned(delta) : "—"}
           sub={session ? `${buyShare.toFixed(1)}% buy` : undefined}
           tone={delta >= 0 ? "buy" : "sell"}
         />
-        <Stat label="Trades / s" value={studies.tradesPerSec.toFixed(1)} sub={session ? `${session.trades.toLocaleString()} total` : undefined} />
+        {isPerp && <DerivativesStats derivatives={derivatives} oiChange={oiChange} now={now} base={base} multiVenue={selectedVenues.length > 1} />}
         <Stat
+          className="stat-p2"
+          label={marketType === "forex" ? "Ticks" : "Volume"}
+          value={session ? formatCompact(session.volume) : "—"}
+          sub={session && marketType !== "forex" ? `${quote}${formatCompact(session.notional)}` : undefined}
+        />
+        <Stat
+          className="stat-p2"
           label="Realized vol"
           value={studies.rv === null ? "—" : `${studies.rv.toFixed(1)}%`}
-          sub="5m · annualized"
+          sub="5m ann."
           tone="warn"
           title="Annualized realized volatility from 60 × 5-second log returns"
         />
         <Stat
+          className="stat-p3"
+          label="Trades / s"
+          value={studies.tradesPerSec.toFixed(1)}
+          sub={session ? `${formatCompact(session.trades)} total` : undefined}
+        />
+        <Stat
+          className="stat-p3"
           label="Volume z"
           value={studies.z === null ? "—" : `${studies.z >= 0 ? "+" : ""}${studies.z.toFixed(2)}σ`}
-          sub="5s vs prior 20"
+          sub="5s vs 20"
           tone={zTone(studies.z)}
           title="Volume in the current 5-second bar versus the previous 20 bars"
         />
-        {isPerp && <DerivativesStats derivatives={derivatives} oiChange={oiChange} now={now} base={base} multiVenue={selectedVenues.length > 1} />}
       </div>
     </section>
   );
@@ -163,34 +177,48 @@ function DerivativesStats({
       <Stat
         label="Open interest"
         value={d?.openInterestValue ? `$${formatCompact(d.openInterestValue, 2)}` : "—"}
-        sub={d?.openInterest ? `${formatCompact(d.openInterest, 2)} ${base}${oiChange ? ` · ${formatPercent(oiChange.oiChange * 100, 2)} 5m` : ""}` : undefined}
+        sub={
+          oiChange ? (
+            <>
+              {formatPercent(oiChange.oiChange * 100, 2)} ·{" "}
+              <span className={`tone-${regimeTone(regime)}`}>{regime ? OI_REGIME_LABEL[regime] : "—"}</span>
+            </>
+          ) : d?.openInterest ? (
+            `${formatCompact(d.openInterest, 2)} ${base}`
+          ) : undefined
+        }
         tone="accent"
-        title={["Open contracts (base units × mark price)", ...oiPerVenue].join(nl)}
+        title={[
+          `Open contracts: ${d?.openInterest ? `${formatCompact(d.openInterest, 2)} ${base}` : "—"}`,
+          ...oiPerVenue,
+          "",
+          regime && oiChange
+            ? `5m positioning: ${OI_REGIME_LABEL[regime]} (price ${formatPercent(oiChange.priceChange * 100, 2)}, OI ${formatPercent(oiChange.oiChange * 100, 2)}). ${OI_REGIME_HINT[regime]}`
+            : "5m positioning: needs open-interest history",
+        ].join(nl)}
       />
       <Stat
-        label={multiVenue ? "Funding (8h avg)" : `Funding / ${fundingHours}h`}
+        label={multiVenue ? "Funding 8h avg" : `Funding ${fundingHours}h`}
         value={fundingRate === null ? "—" : pct(fundingRate)}
         sub={
           fundingRate === null
             ? undefined
-            : `${countdown ? `next ${countdown}` : d?.nextFundingTime ? "next —" : "continuous"} · ${formatPercent(annualizeFunding(fundingRate, fundingHours) * 100, 1)} APR`
+            : countdown ? `in ${countdown}` : d?.nextFundingTime ? "in —" : "continuous"
         }
         tone={fundingTone}
-        title={["Positive funding: longs pay shorts. Negative: shorts pay longs.", ...perVenue].join(nl)}
+        title={[
+          "Positive funding: longs pay shorts. Negative: shorts pay longs.",
+          fundingRate === null ? "" : `Annualized: ${formatPercent(annualizeFunding(fundingRate, fundingHours) * 100, 1)}`,
+          ...perVenue,
+        ].join(nl)}
       />
       <Stat
+        className="stat-p2"
         label="Basis"
         value={d?.basisBps == null ? "—" : `${d.basisBps >= 0 ? "+" : ""}${d.basisBps.toFixed(1)} bp`}
-        sub={d?.markPrice && d.indexPrice ? "mark vs index" : undefined}
+        sub={d?.markPrice && d.indexPrice ? "vs index" : undefined}
         tone={d?.basisBps == null ? undefined : d.basisBps >= 0 ? "buy" : "sell"}
         title="Perpetual mark price relative to the venue's spot index. Positive: the perp trades at a premium."
-      />
-      <Stat
-        label="Positioning"
-        value={regime ? OI_REGIME_LABEL[regime] : "—"}
-        sub={oiChange ? `px ${formatPercent(oiChange.priceChange * 100, 2)} · OI ${formatPercent(oiChange.oiChange * 100, 2)}` : "5m price × OI"}
-        tone={regimeTone(regime)}
-        title={regime ? OI_REGIME_HINT[regime] : "Joint 5-minute move of price and open interest"}
       />
     </>
   );

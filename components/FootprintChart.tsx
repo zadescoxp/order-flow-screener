@@ -10,14 +10,12 @@ import { Button, Panel, Segmented } from "@/components/ui/Primitives";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 import IndicatorsMenu from "./IndicatorsMenu";
 import { ARRIVAL_SLACK_MS } from "@/lib/engine/derivatives";
-import type { FootprintCandle, FootprintLevel, NormalizedLiquidation, VolumeProfile } from "@/lib/types/market";
+import { imbalanceOf, stackedRuns } from "@/lib/engine/imbalance";
+import type { BigTrade, FootprintCandle, NormalizedLiquidation, VolumeProfile } from "@/lib/types/market";
 
-interface LiquidationBubble {
-  x: number;
-  y: number;
-  r: number;
-  liq: NormalizedLiquidation;
-}
+type Bubble =
+  | { x: number; y: number; r: number; kind: "liquidation"; liq: NormalizedLiquidation }
+  | { x: number; y: number; r: number; kind: "trade"; trade: BigTrade };
 const MAX_BUBBLES = 400;
 
 /** Index of the candle whose [openTime, closeTime] contains `time`, or -1. */
@@ -101,6 +99,7 @@ export default function FootprintChart() {
   const venue = useSessionStore((s) => s.venue);
   const marketType = useSessionStore((s) => s.marketType);
   const liquidations = useSessionStore((s) => s.liquidations);
+  const bigTrades = useSessionStore((s) => s.bigTrades);
   const ind = useUIStore((s) => s.indicators);
   const setCrosshair = useSessionStore((s) => s.setCrosshair);
   const mode = useUIStore((s) => s.footprintMode);
@@ -119,7 +118,7 @@ export default function FootprintChart() {
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
   const dragRef = useRef<{ x: number; y: number; scrollX: number; scrollY: number } | null>(null);
   const layoutRef = useRef<Layout | null>(null);
-  const bubblesRef = useRef<LiquidationBubble[]>([]);
+  const bubblesRef = useRef<Bubble[]>([]);
 
   const decimals = priceDecimals(tickSize, ticker?.price);
 
@@ -298,51 +297,75 @@ export default function FootprintChart() {
         if (vwapPath(0)) ctx.stroke();
       }
 
-      // ── Liquidation bubbles ──
-      // Placed at the liquidation price and at its time within the candle,
-      // sized by notional relative to the largest visible liquidation.
-      if (ind.liquidations && marketType === "perpetual" && liquidations.length) {
-        const firstVisible = allCandles[startIndex]?.openTime ?? allCandles[0].openTime;
-        const visible: { liq: NormalizedLiquidation; ci: number }[] = [];
-        let maxNotional = 0;
-        for (let i = liquidations.length - 1; i >= 0 && visible.length < MAX_BUBBLES; i--) {
-          const liq = liquidations[i];
-          if (liq.timestamp < firstVisible - ARRIVAL_SLACK_MS) break;
-          if (liq.timestamp < firstVisible) continue;
-          const ci = candleIndexAt(allCandles, liq.timestamp);
+      // ── Bubbles: big trades and liquidations ──
+      // Placed at the print price and at its time within the candle, sized by
+      // notional relative to the largest visible bubble of the same kind.
+      // Big trades are plain discs; liquidations carry a warning-coloured ring.
+      const bubbles: Bubble[] = [];
+      const firstVisible = allCandles[startIndex]?.openTime ?? allCandles[0].openTime;
+      const collect = <T extends { timestamp: number; quoteVolume: number }>(items: T[], keep: (item: T) => boolean) => {
+        const visible: { item: T; ci: number }[] = [];
+        let max = 0;
+        for (let i = items.length - 1; i >= 0 && visible.length < MAX_BUBBLES; i--) {
+          const item = items[i];
+          if (item.timestamp < firstVisible - ARRIVAL_SLACK_MS) break;
+          if (item.timestamp < firstVisible || !keep(item)) continue;
+          const ci = candleIndexAt(allCandles, item.timestamp);
           if (ci < 0) continue;
-          visible.push({ liq, ci });
-          if (liq.quoteVolume > maxNotional) maxNotional = liq.quoteVolume;
+          visible.push({ item, ci });
+          if (item.quoteVolume > max) max = item.quoteVolume;
         }
-        const bubbles: LiquidationBubble[] = [];
-        // Oldest first so newer bubbles draw on top; smallest last within ties is fine.
-        for (let i = visible.length - 1; i >= 0; i--) {
-          const { liq, ci } = visible[i];
-          const candle = allCandles[ci];
-          const frac = Math.min(1, Math.max(0, (liq.timestamp - candle.openTime) / (candle.closeTime - candle.openTime + 1)));
-          const x = colX(ci) + 6 + frac * (colW - 12);
-          const y = priceY(liq.price) + rowH / 2;
-          if (x < plotL - 16 || x > plotR + 16 || y < plotT - 16 || y > plotB + 16) continue;
-          const r = 3 + 11 * Math.sqrt(liq.quoteVolume / (maxNotional || 1));
+        return { visible: visible.reverse(), max: max || 1 };
+      };
+      const place = (timestamp: number, price: number, ci: number) => {
+        const candle = allCandles[ci];
+        const frac = Math.min(1, Math.max(0, (timestamp - candle.openTime) / (candle.closeTime - candle.openTime + 1)));
+        return { x: colX(ci) + 6 + frac * (colW - 12), y: priceY(price) + rowH / 2 };
+      };
+      const onScreen = (x: number, y: number) => x >= plotL - 16 && x <= plotR + 16 && y >= plotT - 16 && y <= plotB + 16;
+      const label = (text: string, x: number, y: number) => {
+        ctx.font = monoFont(8, 700);
+        ctx.textAlign = "center";
+        ctx.fillStyle = p.text;
+        ctx.fillText(text, x, y + 0.5);
+        ctx.font = monoFont(fontSize);
+      };
+
+      if (ind.bigTrades && bigTrades.length) {
+        const { visible, max } = collect(bigTrades, (t) => t.ratio >= ind.bigTradeRatio);
+        for (const { item: trade, ci } of visible) {
+          const { x, y } = place(trade.timestamp, trade.price, ci);
+          if (!onScreen(x, y)) continue;
+          const r = 3 + 10 * Math.sqrt(trade.quoteVolume / max);
+          const color = trade.side === "buy" ? p.buy : p.sell;
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.fillStyle = withAlpha(color, 0.5);
+          ctx.fill();
+          if (r >= 11) label(formatCompact(trade.quoteVolume, 1), x, y);
+          bubbles.push({ x, y, r, kind: "trade", trade });
+        }
+      }
+
+      if (ind.liquidations && marketType === "perpetual" && liquidations.length) {
+        const { visible, max } = collect(liquidations, () => true);
+        for (const { item: liq, ci } of visible) {
+          const { x, y } = place(liq.timestamp, liq.price, ci);
+          if (!onScreen(x, y)) continue;
+          const r = 3 + 11 * Math.sqrt(liq.quoteVolume / max);
           const color = liq.side === "long" ? p.sell : p.buy;
           ctx.beginPath();
           ctx.arc(x, y, r, 0, Math.PI * 2);
           ctx.fillStyle = withAlpha(color, r > 8 ? 0.42 : 0.3);
           ctx.fill();
-          ctx.lineWidth = 1.25;
-          ctx.strokeStyle = withAlpha(color, 0.95);
+          ctx.lineWidth = 1.75;
+          ctx.strokeStyle = p.warn;
           ctx.stroke();
-          if (r >= 11) {
-            ctx.font = monoFont(8, 700);
-            ctx.textAlign = "center";
-            ctx.fillStyle = p.text;
-            ctx.fillText(formatCompact(liq.quoteVolume, 1), x, y + 0.5);
-            ctx.font = monoFont(fontSize);
-          }
-          bubbles.push({ x, y, r, liq });
+          if (r >= 11) label(formatCompact(liq.quoteVolume, 1), x, y);
+          bubbles.push({ x, y, r, kind: "liquidation", liq });
         }
-        bubblesRef.current = bubbles;
       }
+      bubblesRef.current = bubbles;
 
       // ── Last price line ──
       const lastY = priceY(lastPrice) + rowH / 2;
@@ -481,7 +504,7 @@ export default function FootprintChart() {
       ctx.textAlign = "center";
       ctx.fillText(`TICK ${formatPriceValue(tick, priceDecimals(tick))}`, plotR + AXIS_W / 2, HEADER_H / 2 + 1);
     },
-    [allCandles, tickSize, volumeProfile, session, ticker, mode, showProfile, showHeatmap, ind, decimals, liquidations, marketType]
+    [allCandles, tickSize, volumeProfile, session, ticker, mode, showProfile, showHeatmap, ind, decimals, liquidations, bigTrades, marketType]
   );
 
   const { containerRef, canvasRef, redraw } = useCanvas(draw);
@@ -566,11 +589,28 @@ export default function FootprintChart() {
       return;
     }
     if (y < plotT) return hideTooltip();
-    // Liquidation bubbles take precedence over the cell underneath.
-    let hit: LiquidationBubble | null = null;
+    // Bubbles take precedence over the cell underneath; the smallest hit wins.
+    let hit: Bubble | null = null;
     for (const bubble of bubblesRef.current) {
       const d = Math.hypot(bubble.x - x, bubble.y - y);
       if (d <= bubble.r + 2 && (!hit || bubble.r < hit.r)) hit = bubble;
+    }
+    if (hit?.kind === "trade") {
+      const { trade } = hit;
+      setCrosshair(candle.openTime, trade.price);
+      showTooltip(
+        `Big ${trade.side} · $${formatCompact(trade.quoteVolume, 2)}`,
+        [
+          `Price: ${formatPriceValue(trade.price, decimals)}`,
+          `Size: ${formatCompact(trade.quantity, 3)} (${trade.ratio.toFixed(1)}× average print)`,
+          `Time: ${formatClock(trade.timestamp, true)}`,
+          `Venue: ${VENUE_LABEL[trade.venue] ?? trade.venue}`,
+          "",
+          trade.side === "buy" ? "An aggressive buyer lifted the offer." : "An aggressive seller hit the bid.",
+        ].join("\n"),
+        e
+      );
+      return;
     }
     if (hit) {
       const { liq } = hit;
@@ -656,8 +696,11 @@ export default function FootprintChart() {
           {ind.vwap && <span><i className="lg" style={{ background: ind.vwapColor ?? "var(--vwap)" }} />VWAP{ind.vwapBands ? " ±1σ ±2σ" : ""}</span>}
           {(ind.sessionPoc || ind.valueArea) && <span><i className="lg" style={{ background: ind.pocColor ?? "var(--poc)" }} />POC / VA {Math.round(ind.valueAreaPct * 100)}%</span>}
           {ind.stackedImbalances && <span><i className="lg lg-stack-buy" /><i className="lg lg-stack-sell" />Stacked ≥{ind.stackedLevels} @ {ind.imbalanceRatio}×</span>}
+          {ind.bigTrades && (
+            <span><i className="lg" style={{ background: "var(--buy)" }} /><i className="lg" style={{ background: "var(--sell)" }} />Big prints ≥{ind.bigTradeRatio}×</span>
+          )}
           {ind.liquidations && marketType === "perpetual" && (
-            <span><i className="lg" style={{ background: "var(--sell)" }} /><i className="lg" style={{ background: "var(--buy)" }} />Liquidations long / short</span>
+            <span><i className="lg lg-liq" style={{ background: "var(--sell)" }} /><i className="lg lg-liq" style={{ background: "var(--buy)" }} />Liquidations long / short</span>
           )}
           <span className="legend-hint">Drag to pan · Wheel scroll · ⌘/Ctrl+wheel row zoom · Alt+wheel column width · Double-click to follow</span>
         </div>
@@ -691,35 +734,6 @@ export default function FootprintChart() {
       </div>
     </Panel>
   );
-}
-
-/** Horizontal imbalance at a level for the chosen ratio (engine rule, evaluated at render time). */
-function imbalanceOf(level: FootprintLevel, ratio: number): "buy" | "sell" | null {
-  if (level.bidVolume > 0 && level.askVolume / level.bidVolume >= ratio) return "buy";
-  if (level.askVolume > 0 && level.bidVolume / level.askVolume >= ratio) return "sell";
-  return null;
-}
-
-/** Runs of ≥ minLevels consecutive traded levels imbalanced in the same direction. */
-function stackedRuns(candle: FootprintCandle, ratio: number, minLevels: number) {
-  const out: { dir: "buy" | "sell"; start: number; end: number }[] = [];
-  const prices = candle.sortedPrices;
-  let dir: "buy" | "sell" | null = null;
-  let startIndex = 0;
-  const flush = (endIndex: number) => {
-    if (dir && endIndex - startIndex + 1 >= minLevels) out.push({ dir, start: prices[startIndex], end: prices[endIndex] });
-  };
-  for (let i = 0; i < prices.length; i++) {
-    const level = candle.levels.get(prices[i]);
-    const d = level ? imbalanceOf(level, ratio) : null;
-    if (d !== dir) {
-      flush(i - 1);
-      dir = d;
-      startIndex = i;
-    }
-  }
-  flush(prices.length - 1);
-  return out;
 }
 
 /** Rounded cell used for footprint, profile and summary blocks. */

@@ -13,6 +13,9 @@ import { useUIStore } from "@/lib/store/uiStore";
 import { GitHubIcon, REPO_URL, Wordmark } from "@/components/Logo";
 import { Icon } from "@/components/ui/Icons";
 import { Menu, MenuCheckbox, MenuSection, Segmented, Select } from "@/components/ui/Primitives";
+import AlertsMenu from "@/components/AlertsMenu";
+import RecordingsMenu from "@/components/RecordingsMenu";
+import ExportMenu from "@/components/ExportMenu";
 
 const TIMEFRAMES: { value: Timeframe; label: string }[] = [
   { value: "1m", label: "1m" }, { value: "5m", label: "5m" }, { value: "15m", label: "15m" },
@@ -64,6 +67,8 @@ export default function TopBar() {
   const toolProfile = useUIStore((s) => s.toolProfile);
   const setToolProfile = useUIStore((s) => s.setToolProfile);
   const setPanelVisible = useUIStore((s) => s.setPanelVisible);
+  // During a replay the market is fixed by the recording.
+  const replaying = useSessionStore((s) => s.replay !== null);
 
   const isForex = marketType === "forex";
   const instrumentOptions: PickerOption<string>[] = isForex
@@ -124,6 +129,7 @@ export default function TopBar() {
         <Wordmark size={28} />
       </Link>
 
+      <fieldset className="topbar-market" disabled={replaying} title={replaying ? "Exit the replay to change the market" : undefined}>
       <div className="topbar-group">
         <Segmented
           value={marketType}
@@ -166,8 +172,15 @@ export default function TopBar() {
       <div className="topbar-group">
         <Segmented accent value={timeframe} onChange={setTimeframe} options={TIMEFRAMES} ariaLabel="Candle interval" />
       </div>
+      </fieldset>
 
       <div className="topbar-spacer" />
+
+      <div className="topbar-group topbar-tools">
+        <AlertsMenu />
+        <RecordingsMenu />
+        <ExportMenu />
+      </div>
 
       <div className="topbar-group">
         <Segmented value={toolProfile} onChange={setToolProfile} options={PROFILES} ariaLabel="Workspace" />
@@ -199,7 +212,7 @@ export default function TopBar() {
         title="View the source, open issues and send pull requests on GitHub"
       >
         <GitHubIcon size={15} />
-        Contribute
+        <span className="contribute-label">Contribute</span>
       </a>
       <span className="topbar-break" aria-hidden />
     </header>

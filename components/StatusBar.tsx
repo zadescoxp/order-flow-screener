@@ -25,6 +25,7 @@ export default function StatusBar() {
   const session = useSessionStore((s) => s.session);
   const candles = useSessionStore((s) => s.candles.length);
   const now = useNow();
+  const replay = useSessionStore((s) => s.replay);
 
   const venues = marketType === "forex" ? (["finnhub-forex"] as const) : selectedVenues;
   const live = venues.filter((v) => connections[v]?.status === "live").length;
@@ -34,7 +35,13 @@ export default function StatusBar() {
   return (
     <footer className="statusbar">
       <div className="statusbar-feeds">
-        {venues.map((venue) => {
+        {replay && (
+          <span className="feed" title="The live feed is disconnected while a recording plays back">
+            <span className="status-dot stale" />
+            Replaying recorded data · live feed paused
+          </span>
+        )}
+        {!replay && venues.map((venue) => {
           const conn = connections[venue];
           const status = conn?.status ?? "connecting";
           return (
@@ -49,7 +56,7 @@ export default function StatusBar() {
             </span>
           );
         })}
-        {venues.length > 1 && <strong>{live}/{venues.length} live</strong>}
+        {!replay && venues.length > 1 && <strong>{live}/{venues.length} live</strong>}
       </div>
       <div className="statusbar-meta">
         <span title="Exchange timestamp to local receive time for the latest print (includes clock skew)">

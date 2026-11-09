@@ -107,15 +107,17 @@ export function Stat({
   sub,
   tone,
   title,
+  className = "",
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   tone?: "buy" | "sell" | "warn" | "accent" | "muted" | "vwap" | "poc";
   title?: string;
+  className?: string;
 }) {
   return (
-    <div className="stat" title={title}>
+    <div className={`stat ${className}`} title={title}>
       <span className="stat-label">{label}</span>
       <span className={`stat-value ${tone ? `tone-${tone}` : ""}`}>{value}</span>
       {sub !== undefined && <span className="stat-sub">{sub}</span>}

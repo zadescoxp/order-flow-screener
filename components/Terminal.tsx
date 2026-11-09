@@ -2,6 +2,10 @@
 
 import React, { useEffect, useLayoutEffect } from "react";
 import { useMarketData } from "@/hooks/useMarketData";
+import { useAlerts } from "@/hooks/useAlerts";
+import { useAlertStore } from "@/lib/store/alertStore";
+import AlertToasts from "@/components/AlertToasts";
+import ReplayBar from "@/components/ReplayBar";
 import { MarketSessionProvider, useSessionStore } from "@/lib/session/SessionContext";
 import { useUIStore } from "@/lib/store/uiStore";
 import { applyTheme } from "@/lib/theme";
@@ -50,6 +54,7 @@ export default function Terminal() {
 
 function SessionTerminal() {
   useMarketData();
+  useAlerts();
 
   const panels = useUIStore((s) => s.panels);
   const theme = useUIStore((s) => s.theme);
@@ -61,6 +66,7 @@ function SessionTerminal() {
 
   useEffect(() => {
     void useUIStore.persist.rehydrate();
+    void useAlertStore.persist.rehydrate();
   }, []);
 
   useLayoutEffect(() => {
@@ -82,6 +88,7 @@ function SessionTerminal() {
       <GlobalTooltip />
       <BugReportDialog />
       <TopBar />
+      <ReplayBar />
       <MarketStatsBar />
 
       <div className="workspace">
@@ -134,6 +141,7 @@ function SessionTerminal() {
       </div>
 
       <StatusBar />
+      <AlertToasts />
     </div>
   );
 }
