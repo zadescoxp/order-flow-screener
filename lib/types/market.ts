@@ -41,6 +41,60 @@ export interface NormalizedTrade {
 }
 
 // ----------------------------------------------------------
+// Normalized Liquidation (forced close of a derivatives position)
+// `side` is the position that was liquidated: a long liquidation is
+// executed as a forced sell, a short liquidation as a forced buy.
+// ----------------------------------------------------------
+export type LiquidationSide = "long" | "short";
+
+export interface NormalizedLiquidation {
+  id: string;
+  venue: Venue;
+  symbol: string;
+  timestamp: number;
+  localTimestamp: number;
+  price: number;
+  quantity: number; // base asset quantity
+  quoteVolume: number; // price * quantity
+  side: LiquidationSide;
+}
+
+// ----------------------------------------------------------
+// Derivatives state (perpetuals): open interest, funding, mark/index.
+// Adapters emit partial updates; the manager merges them per venue.
+// ----------------------------------------------------------
+export interface DerivativesSnapshot {
+  venue: Venue;
+  timestamp: number;
+  openInterest?: number; // base asset units
+  fundingRate?: number; // decimal rate per funding interval (0.0001 = 0.01%)
+  fundingIntervalHours?: number;
+  nextFundingTime?: number; // ms
+  markPrice?: number;
+  indexPrice?: number;
+}
+
+export interface DerivativesAggregate {
+  timestamp: number;
+  venues: DerivativesSnapshot[];
+  openInterest: number | null; // base units, summed over reporting venues
+  openInterestValue: number | null; // quote units
+  fundingRate8h: number | null; // OI-weighted, normalized to an 8h interval
+  nextFundingTime: number | null; // primary venue
+  fundingIntervalHours: number | null; // primary venue
+  primaryFundingRate: number | null; // primary venue, native interval
+  markPrice: number | null;
+  indexPrice: number | null;
+  basisBps: number | null; // (mark − index) / index in basis points
+}
+
+export interface OpenInterestPoint {
+  time: number; // second bucket (ms)
+  openInterest: number; // base units
+  price: number;
+}
+
+// ----------------------------------------------------------
 // Normalized Order Book Entry
 // ----------------------------------------------------------
 export interface OrderBookLevel {
@@ -254,6 +308,8 @@ export interface PanelVisibility {
   volumeZ: boolean;
   volatility: boolean;
   depthOfMarket: boolean;
+  liquidations: boolean; // perpetuals only
+  openInterest: boolean; // perpetuals only
 }
 
 // ----------------------------------------------------------

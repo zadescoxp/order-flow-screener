@@ -430,7 +430,15 @@ button, select, input { font: inherit; color: inherit; }
 .tape-row.sell .tape-price, .tape-row.sell .tape-size { color: var(--sell); }
 .tape-row.is-block .tape-size { font-weight: 700; color: var(--text-primary); }
 .tape-row.is-block::before { content: ""; position: absolute; left: 1px; top: 5px; bottom: 5px; width: 3px; border-radius: 2px; background: var(--warn); }
-.tape-time { color: var(--text-muted); font-size: 11px; }
+.tape-row.is-liq { outline: 1px dashed color-mix(in srgb, var(--warn) 55%, transparent); outline-offset: -1px; }
+.tape-row.is-liq.buy { background: color-mix(in srgb, var(--buy) 16%, transparent); }
+.tape-row.is-liq.sell { background: color-mix(in srgb, var(--sell) 16%, transparent); }
+.tape-row.is-liq .tape-size { font-weight: 700; }
+.tape-time { color: var(--text-muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.liq-state { margin-left: 8px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); font-size: 10px; font-weight: 600; vertical-align: middle; }
+.liq-state.is-active { color: var(--text-secondary); }
+.liq-state.is-cascade { border-color: var(--warn); background: var(--warn); color: var(--on-accent); }
+.liq-tag { display: inline-block; margin-right: 5px; padding: 0 4px; border-radius: 4px; background: var(--warn); color: var(--on-accent); font-size: 9px; font-weight: 700; line-height: 14px; }
 .tape-venue { color: var(--text-muted); font-size: 10.5px; }
 .tick-arrow { display: inline-block; width: 9px; margin-left: 3px; font-style: normal; font-size: 8px; color: var(--text-muted); }
 .tick-arrow.up::before { content: "▲"; color: var(--buy); }

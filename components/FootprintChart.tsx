@@ -4,12 +4,35 @@ import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useSessionStore } from "@/lib/session/SessionContext";
 import { useUIStore, type FootprintMode, type IndicatorSettings } from "@/lib/store/uiStore";
 import { useCanvas, withAlpha, monoFont, type Palette } from "@/hooks/useCanvas";
-import { formatCompact, formatHM, formatPriceValue, formatSigned, priceDecimals, VENUE_LABEL } from "@/lib/format";
+import { formatClock, formatCompact, formatHM, formatPriceValue, formatSigned, priceDecimals, VENUE_LABEL } from "@/lib/format";
 import { Icon } from "@/components/ui/Icons";
 import { Button, Panel, Segmented } from "@/components/ui/Primitives";
 import { showTooltip, hideTooltip } from "./GlobalTooltip";
 import IndicatorsMenu from "./IndicatorsMenu";
-import type { FootprintCandle, FootprintLevel, VolumeProfile } from "@/lib/types/market";
+import { ARRIVAL_SLACK_MS } from "@/lib/engine/derivatives";
+import type { FootprintCandle, FootprintLevel, NormalizedLiquidation, VolumeProfile } from "@/lib/types/market";
+
+interface LiquidationBubble {
+  x: number;
+  y: number;
+  r: number;
+  liq: NormalizedLiquidation;
+}
+const MAX_BUBBLES = 400;
+
+/** Index of the candle whose [openTime, closeTime] contains `time`, or -1. */
+function candleIndexAt(candles: FootprintCandle[], time: number): number {
+  let lo = 0;
+  let hi = candles.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const c = candles[mid];
+    if (time < c.openTime) hi = mid - 1;
+    else if (time > c.closeTime) lo = mid + 1;
+    else return mid;
+  }
+  return -1;
+}
 
 // ─── Footprint Chart ─────────────────────────────────────────────
 // Price × time × executed volume. Each column is one candle; each row is
@@ -77,6 +100,7 @@ export default function FootprintChart() {
   const timeframe = useSessionStore((s) => s.timeframe);
   const venue = useSessionStore((s) => s.venue);
   const marketType = useSessionStore((s) => s.marketType);
+  const liquidations = useSessionStore((s) => s.liquidations);
   const ind = useUIStore((s) => s.indicators);
   const setCrosshair = useSessionStore((s) => s.setCrosshair);
   const mode = useUIStore((s) => s.footprintMode);
@@ -95,6 +119,7 @@ export default function FootprintChart() {
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
   const dragRef = useRef<{ x: number; y: number; scrollX: number; scrollY: number } | null>(null);
   const layoutRef = useRef<Layout | null>(null);
+  const bubblesRef = useRef<LiquidationBubble[]>([]);
 
   const decimals = priceDecimals(tickSize, ticker?.price);
 
@@ -104,6 +129,7 @@ export default function FootprintChart() {
       ctx.fillStyle = p.bgPanel;
       ctx.fillRect(0, 0, W, H);
       layoutRef.current = null;
+      bubblesRef.current = [];
       if (allCandles.length === 0) return;
 
       // ── Price ladder bounds ──
@@ -272,6 +298,52 @@ export default function FootprintChart() {
         if (vwapPath(0)) ctx.stroke();
       }
 
+      // ── Liquidation bubbles ──
+      // Placed at the liquidation price and at its time within the candle,
+      // sized by notional relative to the largest visible liquidation.
+      if (ind.liquidations && marketType === "perpetual" && liquidations.length) {
+        const firstVisible = allCandles[startIndex]?.openTime ?? allCandles[0].openTime;
+        const visible: { liq: NormalizedLiquidation; ci: number }[] = [];
+        let maxNotional = 0;
+        for (let i = liquidations.length - 1; i >= 0 && visible.length < MAX_BUBBLES; i--) {
+          const liq = liquidations[i];
+          if (liq.timestamp < firstVisible - ARRIVAL_SLACK_MS) break;
+          if (liq.timestamp < firstVisible) continue;
+          const ci = candleIndexAt(allCandles, liq.timestamp);
+          if (ci < 0) continue;
+          visible.push({ liq, ci });
+          if (liq.quoteVolume > maxNotional) maxNotional = liq.quoteVolume;
+        }
+        const bubbles: LiquidationBubble[] = [];
+        // Oldest first so newer bubbles draw on top; smallest last within ties is fine.
+        for (let i = visible.length - 1; i >= 0; i--) {
+          const { liq, ci } = visible[i];
+          const candle = allCandles[ci];
+          const frac = Math.min(1, Math.max(0, (liq.timestamp - candle.openTime) / (candle.closeTime - candle.openTime + 1)));
+          const x = colX(ci) + 6 + frac * (colW - 12);
+          const y = priceY(liq.price) + rowH / 2;
+          if (x < plotL - 16 || x > plotR + 16 || y < plotT - 16 || y > plotB + 16) continue;
+          const r = 3 + 11 * Math.sqrt(liq.quoteVolume / (maxNotional || 1));
+          const color = liq.side === "long" ? p.sell : p.buy;
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.fillStyle = withAlpha(color, r > 8 ? 0.42 : 0.3);
+          ctx.fill();
+          ctx.lineWidth = 1.25;
+          ctx.strokeStyle = withAlpha(color, 0.95);
+          ctx.stroke();
+          if (r >= 11) {
+            ctx.font = monoFont(8, 700);
+            ctx.textAlign = "center";
+            ctx.fillStyle = p.text;
+            ctx.fillText(formatCompact(liq.quoteVolume, 1), x, y + 0.5);
+            ctx.font = monoFont(fontSize);
+          }
+          bubbles.push({ x, y, r, liq });
+        }
+        bubblesRef.current = bubbles;
+      }
+
       // ── Last price line ──
       const lastY = priceY(lastPrice) + rowH / 2;
       const up = lastPrice >= (allCandles[allCandles.length - 1].open || lastPrice);
@@ -409,7 +481,7 @@ export default function FootprintChart() {
       ctx.textAlign = "center";
       ctx.fillText(`TICK ${formatPriceValue(tick, priceDecimals(tick))}`, plotR + AXIS_W / 2, HEADER_H / 2 + 1);
     },
-    [allCandles, tickSize, volumeProfile, session, ticker, mode, showProfile, showHeatmap, ind, decimals]
+    [allCandles, tickSize, volumeProfile, session, ticker, mode, showProfile, showHeatmap, ind, decimals, liquidations, marketType]
   );
 
   const { containerRef, canvasRef, redraw } = useCanvas(draw);
@@ -494,6 +566,31 @@ export default function FootprintChart() {
       return;
     }
     if (y < plotT) return hideTooltip();
+    // Liquidation bubbles take precedence over the cell underneath.
+    let hit: LiquidationBubble | null = null;
+    for (const bubble of bubblesRef.current) {
+      const d = Math.hypot(bubble.x - x, bubble.y - y);
+      if (d <= bubble.r + 2 && (!hit || bubble.r < hit.r)) hit = bubble;
+    }
+    if (hit) {
+      const { liq } = hit;
+      setCrosshair(candle.openTime, liq.price);
+      showTooltip(
+        `${liq.side === "long" ? "Long" : "Short"} liquidation · $${formatCompact(liq.quoteVolume, 2)}`,
+        [
+          `Price: ${formatPriceValue(liq.price, decimals)}`,
+          `Size: ${formatCompact(liq.quantity, 3)}`,
+          `Time: ${formatClock(liq.timestamp, true)}`,
+          `Venue: ${VENUE_LABEL[liq.venue] ?? liq.venue}`,
+          "",
+          liq.side === "long"
+            ? "A long position was force-closed with a market sell."
+            : "A short position was force-closed with a market buy.",
+        ].join("\n"),
+        e
+      );
+      return;
+    }
     const price = layout.yPrice(y);
     setCrosshair(candle.openTime, price);
     const level = findLevel(candle, price, layout.tick);
@@ -559,6 +656,9 @@ export default function FootprintChart() {
           {ind.vwap && <span><i className="lg" style={{ background: ind.vwapColor ?? "var(--vwap)" }} />VWAP{ind.vwapBands ? " ±1σ ±2σ" : ""}</span>}
           {(ind.sessionPoc || ind.valueArea) && <span><i className="lg" style={{ background: ind.pocColor ?? "var(--poc)" }} />POC / VA {Math.round(ind.valueAreaPct * 100)}%</span>}
           {ind.stackedImbalances && <span><i className="lg lg-stack-buy" /><i className="lg lg-stack-sell" />Stacked ≥{ind.stackedLevels} @ {ind.imbalanceRatio}×</span>}
+          {ind.liquidations && marketType === "perpetual" && (
+            <span><i className="lg" style={{ background: "var(--sell)" }} /><i className="lg" style={{ background: "var(--buy)" }} />Liquidations long / short</span>
+          )}
           <span className="legend-hint">Drag to pan · Wheel scroll · ⌘/Ctrl+wheel row zoom · Alt+wheel column width · Double-click to follow</span>
         </div>
       }

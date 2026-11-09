@@ -9,14 +9,17 @@ export const PROFILE_PANELS: Record<ToolProfile, PanelVisibility> = {
   "order-flow": {
     footprint: true, volumeProfile: true, heatmap: false, orderBook: true, obi: true,
     timeSales: true, cvd: true, volumeZ: true, volatility: false, depthOfMarket: false,
+    liquidations: true, openInterest: true,
   },
   liquidity: {
     footprint: true, volumeProfile: true, heatmap: true, orderBook: true, obi: true,
     timeSales: false, cvd: false, volumeZ: false, volatility: false, depthOfMarket: true,
+    liquidations: true, openInterest: false,
   },
   volatility: {
     footprint: true, volumeProfile: true, heatmap: false, orderBook: false, obi: false,
     timeSales: true, cvd: false, volumeZ: true, volatility: true, depthOfMarket: false,
+    liquidations: false, openInterest: true,
   },
 };
 
@@ -39,6 +42,7 @@ export interface IndicatorSettings {
   ohlcStrip: boolean;
   summaryRows: boolean;
   lastPrice: boolean;
+  liquidations: boolean; // liquidation bubbles on the footprint (perpetuals)
 }
 
 export const DEFAULT_INDICATORS: IndicatorSettings = {
@@ -58,6 +62,7 @@ export const DEFAULT_INDICATORS: IndicatorSettings = {
   ohlcStrip: true,
   summaryRows: true,
   lastPrice: true,
+  liquidations: true,
 };
 
 interface UIStore {

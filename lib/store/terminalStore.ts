@@ -20,6 +20,9 @@ import type {
   SessionStats,
   VenueConnection,
   MarketTicker,
+  NormalizedLiquidation,
+  DerivativesAggregate,
+  OpenInterestPoint,
 } from "@/lib/types/market";
 import { RingBuffer } from "@/lib/session/RingBuffer";
 import { isForexVenue } from "@/lib/config/venues";
@@ -59,6 +62,9 @@ export interface MarketDataState {
   session: SessionStats | null;
   connections: Record<string, VenueConnection>;
   ticker: MarketTicker | null;
+  liquidations: NormalizedLiquidation[]; // oldest first
+  derivatives: DerivativesAggregate | null;
+  oiHistory: OpenInterestPoint[]; // 1-second samples of total open interest
   crosshairTime: number | null;
   crosshairPrice: number | null;
 }
@@ -98,11 +104,16 @@ export interface MarketDataBatch {
   liveBar: FlowBar | null;
   session: SessionStats | null;
   connections: VenueConnection[];
+  liquidations: NormalizedLiquidation[];
+  derivatives: DerivativesAggregate | null;
+  oiPoints: OpenInterestPoint[];
 }
 
 export const MAX_FLOW_BARS = 7200; // two hours of 1-second bars
 const MAX_CANDLES = 500;
 const MAX_OBI_POINTS = 600;
+export const MAX_LIQUIDATIONS = 5000;
+export const MAX_OI_POINTS = 7200; // two hours of 1-second samples
 
 const INITIAL_SETTINGS: TerminalSettings = {
   symbol: "BTCUSDT",
@@ -131,6 +142,9 @@ const INITIAL_MARKET: MarketDataState = {
   session: null,
   connections: {},
   ticker: null,
+  liquidations: [],
+  derivatives: null,
+  oiHistory: [],
   crosshairTime: null,
   crosshairPrice: null,
 };
@@ -218,6 +232,13 @@ export const createTerminalStore = () => {
               : s.flowBars,
             liveBar: batch.liveBar ?? s.liveBar,
             session: batch.session ?? s.session,
+            liquidations: batch.liquidations.length
+              ? [...s.liquidations, ...batch.liquidations].slice(-MAX_LIQUIDATIONS)
+              : s.liquidations,
+            derivatives: batch.derivatives ?? s.derivatives,
+            oiHistory: batch.oiPoints.length
+              ? [...s.oiHistory, ...batch.oiPoints].slice(-MAX_OI_POINTS)
+              : s.oiHistory,
             connections: batch.connections.length
               ? {
                   ...s.connections,

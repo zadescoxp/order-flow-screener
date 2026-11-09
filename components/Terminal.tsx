@@ -15,6 +15,8 @@ import DepthOfMarket from "@/components/DepthOfMarket";
 import CVDPanel from "@/components/CVDPanel";
 import VolumeZScorePanel from "@/components/VolumeZScorePanel";
 import VolatilityPanel from "@/components/VolatilityPanel";
+import LiquidationsPanel from "@/components/LiquidationsPanel";
+import OpenInterestPanel from "@/components/OpenInterestPanel";
 import GlobalTooltip from "@/components/GlobalTooltip";
 import StatusBar from "@/components/StatusBar";
 import BugReportDialog from "@/components/BugReportDialog";
@@ -25,12 +27,15 @@ import type { PanelVisibility } from "@/lib/types/market";
 //  ├ KPI strip ───────────────────────────────────────────┤
 //  │ footprint + session profile        │ order book       │
 //  │                                    │ book imbalance   │
-//  ├ studies: CVD · Vol Z · RV · Depth ─┤ time & sales     │
+//  ├ studies: CVD · Vol Z · OI · Liq ·  ─┤ time & sales     │
+//  │          RV · Depth                 │                  │
 //  └ status bar ──────────────────────────────────────────┘
 
-const STUDIES: { key: keyof PanelVisibility; Component: React.ComponentType }[] = [
+const STUDIES: { key: keyof PanelVisibility; Component: React.ComponentType; perpOnly?: boolean }[] = [
   { key: "cvd", Component: CVDPanel },
   { key: "volumeZ", Component: VolumeZScorePanel },
+  { key: "openInterest", Component: OpenInterestPanel, perpOnly: true },
+  { key: "liquidations", Component: LiquidationsPanel, perpOnly: true },
   { key: "volatility", Component: VolatilityPanel },
   { key: "depthOfMarket", Component: DepthOfMarket },
 ];
@@ -67,7 +72,9 @@ function SessionTerminal() {
   const setValueAreaPct = useSessionStore((s) => s.setValueAreaPct);
   useEffect(() => setValueAreaPct(valueAreaPct), [valueAreaPct, setValueAreaPct]);
 
-  const studies = STUDIES.filter((study) => panels[study.key]);
+  const marketType = useSessionStore((s) => s.marketType);
+  // Liquidations and open interest exist only for perpetual markets.
+  const studies = STUDIES.filter((study) => panels[study.key] && (!study.perpOnly || marketType === "perpetual"));
   const showSidebar = panels.orderBook || panels.obi || panels.timeSales;
 
   return (

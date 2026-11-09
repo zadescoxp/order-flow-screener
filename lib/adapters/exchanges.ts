@@ -2,12 +2,13 @@
 // EXCHANGE ADAPTERS — All venues
 // ============================================================
 
-import { BaseExchangeAdapter } from "./base";
+import { BaseExchangeAdapter, num } from "./base";
 import type {
   NormalizedTrade,
   NormalizedOrderBook,
   OrderBookLevel,
   Venue,
+  LiquidationSide,
 } from "@/lib/types/market";
 import { FinnhubForexAdapter } from "./forex";
 
@@ -68,7 +69,7 @@ export class BybitFuturesAdapter extends BaseExchangeAdapter {
       this.reconnectAttempts = 0;
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [`publicTrade.${this.symbol}`, `orderbook.50.${this.symbol}`] }));
+      this.ws!.send(JSON.stringify({ op: "subscribe", args: [`publicTrade.${this.symbol}`, `orderbook.50.${this.symbol}`, `tickers.${this.symbol}`, `allLiquidation.${this.symbol}`] }));
       this.startPing(20_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -103,6 +104,22 @@ export class BybitFuturesAdapter extends BaseExchangeAdapter {
       for (const [p, q] of data.a) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
       this.lastSeq = data.u;
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
+    } else if (msg.topic.startsWith("tickers.")) {
+      // Snapshot first, then deltas carrying only the fields that changed.
+      const t = msg.data as Record<string, string | undefined>;
+      this.emitDerivatives({
+        openInterest: num(t.openInterest),
+        fundingRate: num(t.fundingRate),
+        fundingIntervalHours: num(t.fundingIntervalHour),
+        nextFundingTime: num(t.nextFundingTime),
+        markPrice: num(t.markPrice),
+        indexPrice: num(t.indexPrice),
+      });
+    } else if (msg.topic.startsWith("allLiquidation.")) {
+      // S is the liquidated position side: Buy = long position liquidated.
+      for (const l of msg.data as Array<{ T: number; s: string; S: "Buy" | "Sell"; v: string; p: string }>) {
+        this.emitLiquidation({ id: `bbl-${l.s}-${l.T}-${l.S}-${l.v}`, symbol: l.s, timestamp: l.T, price: parseFloat(l.p), quantity: parseFloat(l.v), side: l.S === "Buy" ? "long" : "short" });
+      }
     }
   }
 
@@ -212,7 +229,21 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
       await this.loadContractValue();
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId: this.symbol }, { channel: "books", instId: this.symbol }] }));
+      const instId = this.symbol;
+      const indexId = instId.replace(/-SWAP$/, "");
+      this.ws!.send(JSON.stringify({
+        op: "subscribe",
+        args: [
+          { channel: "trades", instId },
+          { channel: "books", instId },
+          { channel: "open-interest", instId },
+          { channel: "funding-rate", instId },
+          { channel: "mark-price", instId },
+          { channel: "index-tickers", instId: indexId },
+          // Liquidations are only published for the whole instrument type.
+          { channel: "liquidation-orders", instType: "SWAP" },
+        ],
+      }));
       this.startPing(25_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -234,12 +265,48 @@ export class OKXFuturesAdapter extends BaseExchangeAdapter {
 
   protected handleMessage(raw: unknown): void {
     const msg = raw as { arg: { channel: string }; action?: string; data: unknown[] };
-    if (msg.arg.channel === "trades") {
+    const channel = msg.arg.channel;
+    if (channel === "open-interest") {
+      for (const d of msg.data as Array<{ oiCcy?: string; ts?: string }>) this.emitDerivatives({ openInterest: num(d.oiCcy), timestamp: num(d.ts) });
+      return;
+    }
+    if (channel === "funding-rate") {
+      for (const d of msg.data as Array<{ fundingRate?: string; fundingTime?: string; nextFundingTime?: string }>) {
+        const next = num(d.fundingTime);
+        const after = num(d.nextFundingTime);
+        this.emitDerivatives({
+          fundingRate: num(d.fundingRate),
+          nextFundingTime: next,
+          fundingIntervalHours: next && after && after > next ? (after - next) / 3_600_000 : undefined,
+        });
+      }
+      return;
+    }
+    if (channel === "mark-price") {
+      for (const d of msg.data as Array<{ markPx?: string }>) this.emitDerivatives({ markPrice: num(d.markPx) });
+      return;
+    }
+    if (channel === "index-tickers") {
+      for (const d of msg.data as Array<{ idxPx?: string }>) this.emitDerivatives({ indexPrice: num(d.idxPx) });
+      return;
+    }
+    if (channel === "liquidation-orders") {
+      for (const item of msg.data as Array<{ instId: string; details: Array<{ side: "buy" | "sell"; posSide: string; bkPx: string; sz: string; ts: string }> }>) {
+        if (item.instId !== this.symbol) continue;
+        for (const d of item.details ?? []) {
+          // A forced sell (posSide long, or net mode) closes a long.
+          const side = d.posSide === "long" || (d.posSide !== "short" && d.side === "sell") ? "long" : "short";
+          this.emitLiquidation({ id: `okxl-${item.instId}-${d.ts}-${d.sz}`, symbol: item.instId, timestamp: parseInt(d.ts), price: parseFloat(d.bkPx), quantity: parseFloat(d.sz) * this.contractValue, side });
+        }
+      }
+      return;
+    }
+    if (channel === "trades") {
       for (const t of msg.data as Array<{ tradeId: string; instId: string; px: string; sz: string; side: "buy" | "sell"; ts: string }>) {
         const price = parseFloat(t.px), qty = parseFloat(t.sz) * this.contractValue;
         this.emitTrade({ id: `okx-${t.tradeId}`, venue: this.venue, symbol: t.instId, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side, marketType: "perpetual" });
       }
-    } else if (msg.arg.channel === "books") {
+    } else if (channel === "books") {
       // OKX sends one "snapshot" followed by incremental "update" messages;
       // a size of 0 removes the level.
       if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
@@ -425,6 +492,7 @@ export class HyperliquidAdapter extends BaseExchangeAdapter {
       this.setStatus("live");
       this.ws!.send(JSON.stringify({ method: "subscribe", subscription: { type: "trades", coin: this.symbol } }));
       this.ws!.send(JSON.stringify({ method: "subscribe", subscription: { type: "l2Book", coin: this.symbol } }));
+      this.ws!.send(JSON.stringify({ method: "subscribe", subscription: { type: "activeAssetCtx", coin: this.symbol } }));
       this.startPing(20_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -452,6 +520,19 @@ export class HyperliquidAdapter extends BaseExchangeAdapter {
       for (const [p, q] of book.levels[0]) { const pr = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(pr, qty); }
       for (const [p, q] of book.levels[1]) { const pr = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(pr, qty); }
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
+    } else if (msg.channel === "activeAssetCtx") {
+      // Hyperliquid funds hourly, on the hour; oraclePx is its spot index.
+      const { coin, ctx } = msg.data as { coin: string; ctx: { funding?: string; openInterest?: string; markPx?: string; oraclePx?: string } };
+      if (coin !== this.symbol || !ctx) return;
+      const hour = 3_600_000;
+      this.emitDerivatives({
+        openInterest: num(ctx.openInterest),
+        fundingRate: num(ctx.funding),
+        fundingIntervalHours: 1,
+        nextFundingTime: Math.floor(Date.now() / hour) * hour + hour,
+        markPrice: num(ctx.markPx),
+        indexPrice: num(ctx.oraclePx),
+      });
     }
   }
 
@@ -487,7 +568,7 @@ export class BitgetFuturesAdapter extends BaseExchangeAdapter {
       this.setStatus("live");
       const instType = "USDT-FUTURES";
       const instId = this.symbol;
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ instType, channel: "trade", instId }, { instType, channel: "books", instId }] }));
+      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ instType, channel: "trade", instId }, { instType, channel: "books", instId }, { instType, channel: "ticker", instId }] }));
       this.startPing(25_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -515,6 +596,18 @@ export class BitgetFuturesAdapter extends BaseExchangeAdapter {
         const [ts, px, sz, side] = t;
         const price = parseFloat(px), qty = parseFloat(sz);
         this.emitTrade({ id: `bg-${ts}`, venue: this.venue, symbol: this.symbol, timestamp: parseInt(ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: side === "buy" ? "buy" : "sell", marketType: "perpetual" });
+      }
+    } else if (msg.arg.channel === "ticker") {
+      // holdingAmount is open interest in base units. Bitget has no public liquidation stream.
+      for (const t of msg.data as Array<Record<string, string | undefined>>) {
+        this.emitDerivatives({
+          openInterest: num(t.holdingAmount),
+          fundingRate: num(t.fundingRate),
+          nextFundingTime: num(t.nextFundingTime),
+          markPrice: num(t.markPrice),
+          indexPrice: num(t.indexPrice),
+          timestamp: num(t.ts),
+        });
       }
     } else if (msg.arg.channel === "books") {
       if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
@@ -698,7 +791,7 @@ export class DeribitAdapter extends BaseExchangeAdapter {
       this.lastHeartbeat = Date.now();
       this.setStatus("live");
       // Subscribe to trades
-      this.send({ jsonrpc: "2.0", id: this.reqId++, method: "public/subscribe", params: { channels: [`trades.${this.symbol}.100ms`, `book.${this.symbol}.none.20.100ms`] } });
+      this.send({ jsonrpc: "2.0", id: this.reqId++, method: "public/subscribe", params: { channels: [`trades.${this.symbol}.100ms`, `book.${this.symbol}.none.20.100ms`, `ticker.${this.symbol}.100ms`] } });
       this.startPing(15_000);
     };
     this.ws.onmessage = (e: MessageEvent) => {
@@ -721,9 +814,18 @@ export class DeribitAdapter extends BaseExchangeAdapter {
     const { channel, data } = msg.params;
 
     if (channel.startsWith("trades.")) {
-      for (const t of data as Array<{ trade_id: string; instrument_name: string; price: number; amount: number; direction: "buy" | "sell"; timestamp: number }>) {
+      for (const t of data as Array<{ trade_id: string; instrument_name: string; price: number; amount: number; direction: "buy" | "sell"; timestamp: number; liquidation?: "M" | "T" | "MT" }>) {
         const quantity = t.amount / t.price;
         this.emitTrade({ id: `db-${t.trade_id}`, venue: this.venue, symbol: t.instrument_name, timestamp: t.timestamp, localTimestamp: Date.now(), price: t.price, quantity, quoteVolume: t.price * quantity, side: t.direction, marketType: "perpetual" });
+        if (t.liquidation) {
+          // "T": the taker was liquidated, "M": the maker (opposite side), "MT": both.
+          const takerSide: LiquidationSide = t.direction === "sell" ? "long" : "short";
+          const makerSide: LiquidationSide = takerSide === "long" ? "short" : "long";
+          const sides: LiquidationSide[] = t.liquidation === "M" ? [makerSide] : t.liquidation === "T" ? [takerSide] : [takerSide, makerSide];
+          for (const side of sides) {
+            this.emitLiquidation({ id: `dbl-${t.trade_id}-${side}`, symbol: t.instrument_name, timestamp: t.timestamp, price: t.price, quantity, side });
+          }
+        }
       }
     } else if (channel.startsWith("book.")) {
       // Grouped channel (book.X.none.20.100ms) sends full [price, amount] snapshots.
@@ -742,6 +844,19 @@ export class DeribitAdapter extends BaseExchangeAdapter {
         }
       }
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
+    } else if (channel.startsWith("ticker.")) {
+      // Inverse perpetual: open interest is quoted in USD; funding is continuous (8h equivalent).
+      const t = data as { open_interest?: number; funding_8h?: number; mark_price?: number; index_price?: number; timestamp?: number };
+      const mark = num(t.mark_price);
+      const oiUsd = num(t.open_interest);
+      this.emitDerivatives({
+        openInterest: mark && oiUsd ? oiUsd / mark : undefined,
+        fundingRate: num(t.funding_8h),
+        fundingIntervalHours: 8,
+        markPrice: mark,
+        indexPrice: num(t.index_price),
+        timestamp: num(t.timestamp),
+      });
     }
   }
 

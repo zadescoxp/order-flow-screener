@@ -24,6 +24,7 @@ import {
   createSessionStats,
   resolveTickSize,
 } from "@/lib/engine/analytics";
+import { aggregateDerivatives, mergeDerivatives } from "@/lib/engine/derivatives";
 import type { MarketDataBatch, TerminalStore } from "@/lib/store/terminalStore";
 import type { StoreApi } from "zustand";
 import type {
@@ -40,11 +41,20 @@ import type {
   MarketTicker,
   SessionStats,
   VenueConnection,
+  NormalizedLiquidation,
+  DerivativesSnapshot,
+  DerivativesAggregate,
+  OpenInterestPoint,
 } from "@/lib/types/market";
 
 const FLOW_BAR_MS = 1000;
 const MAX_GAP_FILL_BARS = 120;
 const FLUSH_INTERVAL_MS = 50;
+const OI_SAMPLE_MS = 1000;
+// Wait this long for every perp venue to report open interest before the
+// summed series starts, so the total doesn't step up when a slow venue lands.
+const OI_LOCK_GRACE_MS = 15_000;
+const MAX_LIQUIDATION_AGE_MS = 60_000;
 
 export class MarketDataManager {
   private readonly store: StoreApi<TerminalStore>;
@@ -54,6 +64,8 @@ export class MarketDataManager {
     tradeListener: (trade: NormalizedTrade) => void;
     bookListener: (book: NormalizedOrderBook) => void;
     statusListener: (conn: VenueConnection) => void;
+    liquidationListener: (liquidation: NormalizedLiquidation) => void;
+    derivativesListener: (snapshot: DerivativesSnapshot) => void;
   }>();
   private currentSymbol = "";
   private currentVenue: VenueSelection | null = null;
@@ -85,6 +97,17 @@ export class MarketDataManager {
   private pendingTicker: MarketTicker | null = null;
   private pendingOBI: OBISnapshot | null = null;
   private pendingFlowBars: FlowBar[] = [];
+
+  // Derivatives (perpetuals)
+  private derivatives = new Map<Venue, DerivativesSnapshot>();
+  private derivativesDirty = false;
+  private pendingLiquidations: NormalizedLiquidation[] = [];
+  private seenLiquidations = new Set<string>();
+  private pendingOIPoints: OpenInterestPoint[] = [];
+  private oiVenues: Set<Venue> | null = null;
+  private oiTimer: ReturnType<typeof setInterval> | null = null;
+  private subscribedAt = 0;
+  private lastPrice = 0;
 
   constructor(store: StoreApi<TerminalStore>) {
     this.store = store;
@@ -142,11 +165,20 @@ export class MarketDataManager {
         this.pendingConnections.set(conn.venue, conn);
         this.scheduleFlush();
       };
+      const liquidationListener = (liquidation: NormalizedLiquidation) => this.onLiquidation(liquidation);
+      const derivativesListener = (snapshot: DerivativesSnapshot) => this.onDerivatives(snapshot);
       adapter.on("trade", tradeListener);
       adapter.on("orderbook", bookListener);
       adapter.on("status", statusListener);
+      adapter.on("liquidation", liquidationListener);
+      adapter.on("derivatives", derivativesListener);
       this.adapters.set(selectedVenue, adapter);
-      this.listeners.set(selectedVenue, { tradeListener, bookListener, statusListener });
+      this.listeners.set(selectedVenue, { tradeListener, bookListener, statusListener, liquidationListener, derivativesListener });
+    }
+
+    this.subscribedAt = Date.now();
+    if (marketType === "perpetual") {
+      this.oiTimer = setInterval(() => this.sampleOpenInterest(), OI_SAMPLE_MS);
     }
   }
 
@@ -162,12 +194,23 @@ export class MarketDataManager {
     this.pendingOBI = null;
     this.pendingFlowBars = [];
     this.pendingConnections.clear();
+    if (this.oiTimer) clearInterval(this.oiTimer);
+    this.oiTimer = null;
+    this.derivatives.clear();
+    this.derivativesDirty = false;
+    this.pendingLiquidations = [];
+    this.seenLiquidations.clear();
+    this.pendingOIPoints = [];
+    this.oiVenues = null;
+    this.lastPrice = 0;
     for (const [venue, adapter] of this.adapters) {
       const listeners = this.listeners.get(venue);
       if (listeners) {
         adapter.removeListener("trade", listeners.tradeListener);
         adapter.removeListener("orderbook", listeners.bookListener);
         adapter.removeListener("status", listeners.statusListener);
+        adapter.removeListener("liquidation", listeners.liquidationListener);
+        adapter.removeListener("derivatives", listeners.derivativesListener);
       }
       releaseAdapter(venue, this.currentSymbol, this.currentMarketType);
     }
@@ -191,6 +234,7 @@ export class MarketDataManager {
     if (this.paused) return;
     if (!Number.isFinite(trade.price) || trade.price <= 0) return;
     const store = this.store.getState();
+    this.lastPrice = trade.price;
 
     // Footprint rows are sized from the instrument's price on the first print.
     if (!this.tickResolved) {
@@ -314,6 +358,56 @@ export class MarketDataManager {
     this.scheduleFlush();
   }
 
+  private onLiquidation(liquidation: NormalizedLiquidation): void {
+    if (this.paused || !this.adapters.has(liquidation.venue)) return;
+    // Some feeds (OKX) replay the last known liquidation long after the fact,
+    // and snapshot-style feeds can repeat a record; keep only fresh, unseen ones.
+    if (liquidation.timestamp < Date.now() - MAX_LIQUIDATION_AGE_MS) return;
+    if (this.seenLiquidations.has(liquidation.id)) return;
+    this.seenLiquidations.add(liquidation.id);
+    if (this.seenLiquidations.size > 10_000) {
+      this.seenLiquidations = new Set([...this.seenLiquidations].slice(-5_000));
+    }
+    this.pendingLiquidations.push(liquidation);
+    this.scheduleFlush();
+  }
+
+  private onDerivatives(update: DerivativesSnapshot): void {
+    if (this.paused || !this.adapters.has(update.venue)) return;
+    this.derivatives.set(update.venue, mergeDerivatives(this.derivatives.get(update.venue), update));
+    this.derivativesDirty = true;
+    this.scheduleFlush();
+  }
+
+  private computeDerivatives(): DerivativesAggregate | null {
+    return aggregateDerivatives(
+      [...this.derivatives.values()],
+      this.primaryVenue,
+      this.lastPrice || undefined,
+      this.oiVenues ?? undefined
+    );
+  }
+
+  /** Sample summed open interest once a second, against the last traded price. */
+  private sampleOpenInterest(): void {
+    if (this.paused || !this.lastPrice) return;
+    const reporting = [...this.derivatives.values()].filter((s) => s.openInterest !== undefined).map((s) => s.venue);
+    if (!this.oiVenues) {
+      const allReported = this.currentSelectedVenues.every((v) => reporting.includes(v));
+      if (!reporting.length || (!allReported && Date.now() - this.subscribedAt < OI_LOCK_GRACE_MS)) return;
+      this.oiVenues = new Set(reporting);
+      this.derivativesDirty = true;
+    }
+    const aggregate = this.computeDerivatives();
+    if (aggregate?.openInterest == null) return;
+    this.pendingOIPoints.push({
+      time: Math.floor(Date.now() / OI_SAMPLE_MS) * OI_SAMPLE_MS,
+      openInterest: aggregate.openInterest,
+      price: this.lastPrice,
+    });
+    this.scheduleFlush();
+  }
+
   pause(): void {
     this.paused = true;
   }
@@ -344,6 +438,9 @@ export class MarketDataManager {
         liveBar: this.liveBar ? { ...this.liveBar } : null,
         session: this.session ? { ...this.session } : null,
         connections: [...this.pendingConnections.values()],
+        liquidations: this.pendingLiquidations,
+        derivatives: this.derivativesDirty ? this.computeDerivatives() : null,
+        oiPoints: this.pendingOIPoints,
       };
       store.applyMarketDataBatch(batch);
       this.pendingTrades = [];
@@ -355,6 +452,9 @@ export class MarketDataManager {
       this.pendingOBI = null;
       this.pendingFlowBars = [];
       this.pendingConnections.clear();
+      this.pendingLiquidations = [];
+      this.pendingOIPoints = [];
+      this.derivativesDirty = false;
     }, FLUSH_INTERVAL_MS);
   }
 }
