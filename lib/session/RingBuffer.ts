@@ -13,6 +13,10 @@ export class RingBuffer<T> {
     this.length = Math.min(this.length + 1, this.capacity);
   }
 
+  get size(): number {
+    return this.length;
+  }
+
   clear(): void {
     this.cursor = 0;
     this.length = 0;

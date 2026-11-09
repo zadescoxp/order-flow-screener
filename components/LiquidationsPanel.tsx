@@ -11,7 +11,7 @@ import {
   type LiquidationBucket,
 } from "@/lib/engine/derivatives";
 import { useCanvas, withAlpha, monoFont, type Palette } from "@/hooks/useCanvas";
-import { useNow } from "@/hooks/useNow";
+import { useMarketNow } from "@/hooks/useMarketNow";
 import { STUDY_AXIS_W, STUDY_TIME_H, drawEmpty, drawTimeAxis, drawValueAxis } from "@/lib/chartUtils";
 import { formatClock, formatCompact, formatPriceValue, priceDecimals, VENUE_LABEL } from "@/lib/format";
 import { Icon } from "@/components/ui/Icons";
@@ -39,7 +39,7 @@ export default function LiquidationsPanel() {
   const selectedVenues = useSessionStore((s) => s.selectedVenues);
   const tickSize = useSessionStore((s) => s.tickSize);
   const [bucketSec, setBucketSec] = useState<BucketSeconds>(60);
-  const now = useNow(1000);
+  const now = useMarketNow(1000);
   const visibleRef = useRef<{ buckets: LiquidationBucket[]; slot: number; plotR: number }>({ buckets: [], slot: 0, plotR: 0 });
 
   const feedVenues = selectedVenues.filter((v) => LIQUIDATION_FEED_VENUES.has(v));

@@ -11,8 +11,11 @@ export function MarketSessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onVisibilityChange = () => {
-      if (document.hidden) session.pause();
-      else session.resume();
+      // A hidden tab normally pauses the feed; recording, replay and browser
+      // notifications need it to keep running.
+      if (document.hidden) {
+        if (!session.keepAliveWhenHidden()) session.pause();
+      } else session.resume();
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {

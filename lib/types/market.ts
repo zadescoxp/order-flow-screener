@@ -94,6 +94,11 @@ export interface OpenInterestPoint {
   price: number;
 }
 
+/** A print at least N× the session's average print size. */
+export interface BigTrade extends NormalizedTrade {
+  ratio: number; // quantity / session average print at the time
+}
+
 // ----------------------------------------------------------
 // Normalized Order Book Entry
 // ----------------------------------------------------------
