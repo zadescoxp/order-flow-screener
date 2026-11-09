@@ -20,15 +20,17 @@ const MARKET_WS = "wss://fstream.binance.com/market/ws";
 const PUBLIC_WS = "wss://fstream.binance.com/public/ws";
 const REST = "https://fapi.binance.com";
 const OI_POLL_MS = 5_000;
+const DEEP_BOOK_POLL_MS = 5_000;
 
 export class BinanceFuturesAdapter extends BaseExchangeAdapter {
   readonly venue: Venue = "binance-futures";
-  private bids = new Map<number, number>();
-  private asks = new Map<number, number>();
   private depthWs: WebSocket | null = null;
   private depthRetry: ReturnType<typeof setTimeout> | null = null;
   private depthAttempts = 0;
   private oiTimer: ReturnType<typeof setInterval> | null = null;
+  private deepTimer: ReturnType<typeof setInterval> | null = null;
+  private deepBids = new Map<number, number>();
+  private deepAsks = new Map<number, number>();
   private fundingIntervalHours: number | undefined;
   private active = false;
 
@@ -40,6 +42,7 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
     super.connect();
     this.connectDepth();
     this.startOpenInterestPolling();
+    this.startDeepBookPolling();
     void this.loadFundingInterval();
   }
 
@@ -49,6 +52,8 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
     this.depthRetry = null;
     if (this.oiTimer) clearInterval(this.oiTimer);
     this.oiTimer = null;
+    if (this.deepTimer) clearInterval(this.deepTimer);
+    this.deepTimer = null;
     const depth = this.depthWs;
     this.depthWs = null;
     depth?.close();
@@ -96,6 +101,40 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
     };
     void poll();
     this.oiTimer = setInterval(poll, OI_POLL_MS);
+  }
+
+  /** The partial-depth stream stops at 20 levels; a REST snapshot gives the heatmap 1000. */
+  private startDeepBookPolling(): void {
+    if (this.deepTimer || typeof fetch === "undefined") return;
+    const poll = async () => {
+      try {
+        const response = await fetch(`${REST}/fapi/v1/depth?symbol=${encodeURIComponent(this.symbol)}&limit=1000`);
+        if (!response.ok) return;
+        const body = await response.json() as { bids?: [string, string][]; asks?: [string, string][] };
+        const toMap = (levels: [string, string][] = []) => new Map(levels.map(([p, q]) => [Number(p), Number(q)] as [number, number]).filter(([p, q]) => p > 0 && q > 0));
+        if (!this.active) return;
+        this.deepBids = toMap(body.bids);
+        this.deepAsks = toMap(body.asks);
+      } catch { /* next poll retries */ }
+    };
+    void poll();
+    this.deepTimer = setInterval(poll, DEEP_BOOK_POLL_MS);
+  }
+
+  /** Live top-20 inside its own range, the REST snapshot beyond it. */
+  depthSides(): { bids: ReadonlyMap<number, number>; asks: ReadonlyMap<number, number> } | null {
+    if (!this.bids.size && !this.asks.size) return null;
+    const merge = (live: Map<number, number>, deep: Map<number, number>, side: "bid" | "ask") => {
+      if (!live.size) return deep;
+      const prices = [...live.keys()];
+      const edge = side === "bid" ? Math.min(...prices) : Math.max(...prices);
+      const out = new Map(live);
+      for (const [price, size] of deep) {
+        if (side === "bid" ? price < edge : price > edge) out.set(price, size);
+      }
+      return out;
+    };
+    return { bids: merge(this.bids, this.deepBids, "bid"), asks: merge(this.asks, this.deepAsks, "ask") };
   }
 
   /** Most symbols fund every 8h; some use 4h or 1h, listed in fundingInfo. */

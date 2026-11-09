@@ -10,6 +10,7 @@ import { resampleBars, rollingVolumeZScores } from "@/lib/engine/analytics";
 import { formatPriceValue, priceDecimals } from "@/lib/format";
 import { notify, playChime } from "@/lib/alerts/delivery";
 import type { NormalizedLiquidation, NormalizedTrade } from "@/lib/types/market";
+import type { MicroEvent } from "@/lib/engine/microstructure";
 import type { TerminalStore } from "@/lib/store/terminalStore";
 
 const EVALUATE_MS = 250;
@@ -27,6 +28,7 @@ export function useAlerts() {
     const monitor = new AlertMonitor();
     let lastTrade: NormalizedTrade | undefined;
     let lastLiquidation: NormalizedLiquidation | undefined;
+    let lastMicro: MicroEvent | undefined;
     let sessionStart: number | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -58,6 +60,7 @@ export function useAlerts() {
         monitor.reset();
         lastTrade = s.recentTrades[0];
         lastLiquidation = s.liquidations[s.liquidations.length - 1];
+        lastMicro = s.microEvents[s.microEvents.length - 1];
         return;
       }
       if (!s.session) return;
@@ -93,6 +96,12 @@ export function useAlerts() {
         divergence: cvdDivergence(bars, s.tickSize),
         newTrades: newTrades(s),
         newLiquidations: newLiquidations(s),
+        newMicro: (() => {
+          const list = s.microEvents;
+          const index = lastMicro ? list.lastIndexOf(lastMicro) : -1;
+          lastMicro = list[list.length - 1] ?? lastMicro;
+          return list.slice(index + 1);
+        })(),
         format: (p) => formatPriceValue(p, decimals),
       };
       const events = monitor.evaluate(snapshot, settings);

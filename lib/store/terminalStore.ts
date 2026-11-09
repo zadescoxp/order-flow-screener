@@ -25,6 +25,8 @@ import type {
   OpenInterestPoint,
   BigTrade,
 } from "@/lib/types/market";
+import type { MicroEvent } from "@/lib/engine/microstructure";
+import type { VenueBucket } from "@/lib/engine/venues";
 import type { RecordingStatus, ReplayStatus } from "@/lib/recording/types";
 import { RingBuffer } from "@/lib/session/RingBuffer";
 import { isForexVenue } from "@/lib/config/venues";
@@ -69,6 +71,9 @@ export interface MarketDataState {
   oiHistory: OpenInterestPoint[]; // 1-second samples of total open interest
   bigTrades: BigTrade[]; // oldest first; prints ≥ BIG_TRADE_MIN_RATIO × average
   marketClock: number; // wall time when live, virtual time during replay
+  depthVersion: number; // bumps when the manager's depth history gains a snapshot
+  microEvents: MicroEvent[]; // absorption / iceberg detections, oldest first
+  venueBuckets: Partial<Record<Venue, VenueBucket[]>>; // per-venue 250 ms buckets
   crosshairTime: number | null;
   crosshairPrice: number | null;
 }
@@ -119,6 +124,9 @@ export interface MarketDataBatch {
   oiPoints: OpenInterestPoint[];
   bigTrades: BigTrade[];
   clock: number;
+  depthVersion: number; // 0 = unchanged
+  microEvents: MicroEvent[];
+  venueBuckets: Partial<Record<Venue, VenueBucket[]>> | null;
 }
 
 export const MAX_FLOW_BARS = 7200; // two hours of 1-second bars
@@ -127,6 +135,7 @@ const MAX_OBI_POINTS = 600;
 export const MAX_LIQUIDATIONS = 5000;
 export const MAX_OI_POINTS = 7200; // two hours of 1-second samples
 export const MAX_BIG_TRADES = 3000;
+export const MAX_MICRO_EVENTS = 500;
 
 const INITIAL_SETTINGS: TerminalSettings = {
   symbol: "BTCUSDT",
@@ -160,6 +169,9 @@ const INITIAL_MARKET: MarketDataState = {
   oiHistory: [],
   bigTrades: [],
   marketClock: 0,
+  depthVersion: 0,
+  microEvents: [],
+  venueBuckets: {},
   crosshairTime: null,
   crosshairPrice: null,
 };
@@ -260,6 +272,11 @@ export const createTerminalStore = () => {
               ? [...s.bigTrades, ...batch.bigTrades].slice(-MAX_BIG_TRADES)
               : s.bigTrades,
             marketClock: batch.clock || s.marketClock,
+            depthVersion: batch.depthVersion || s.depthVersion,
+            microEvents: batch.microEvents.length
+              ? [...s.microEvents, ...batch.microEvents].slice(-MAX_MICRO_EVENTS)
+              : s.microEvents,
+            venueBuckets: batch.venueBuckets ?? s.venueBuckets,
             connections: batch.connections.length
               ? {
                   ...s.connections,

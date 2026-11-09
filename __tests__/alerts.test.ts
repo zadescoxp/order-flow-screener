@@ -21,6 +21,7 @@ function snap(overrides: Partial<AlertSnapshot> = {}): AlertSnapshot {
     divergence: null,
     newTrades: [],
     newLiquidations: [],
+    newMicro: [],
     format: (p) => p.toFixed(1),
     ...overrides,
   };

@@ -55,6 +55,68 @@ The footprint's **Indicators** menu lets users configure, per browser:
 - Follow mode for the live candle and last price, drag/wheel pan and zoom
 - Device-pixel-ratio aware canvas rendering with synchronized crosshair
 
+### Resting-liquidity heatmap
+
+Order-book depth over time behind the footprint (**Liquidity** in the
+footprint header; on by default in the Liquidity workspace).
+
+- Sampled once a second from each selected venue's full in-memory book,
+  summed across venues and bucketed to the footprint tick, within ±3% of mid
+- Kept for two hours as typed-array snapshots; drawn from an offscreen grid
+  (one pixel column per second, one row per tick) stretched into each candle
+  column, so panning and zooming stay cheap
+- Colour runs dark blue → cyan → yellow → white, scaled to the recent 98th
+  percentile so walls stand out; hovering a footprint level shows its resting
+  size
+- Depth reach differs by venue, so the far rows reflect the deeper books:
+
+| Venue | Depth source |
+| --- | --- |
+| Binance perp | Live top 20 plus a 1000-level REST snapshot every 5 s |
+| Bybit perp | `orderbook.1000` |
+| OKX | `books` (400 levels) |
+| Bitget | `books` (full incremental book) |
+| Coinbase spot | `level2` (full book) |
+| Hyperliquid, Deribit, Binance spot | 20 – 50 levels |
+
+Recordings store these snapshots, so a replayed heatmap matches the live one.
+
+### Absorption and icebergs
+
+Heuristic markers on the footprint (Indicators → Microstructure), also
+available as alert rules:
+
+- **Absorption** (outlined band with an `ABS` tag): in a 10-second window,
+  aggressive volume at one price reached at least an average window's total
+  volume and half of that side's flow, while price did not trade more than one
+  tick through the level. Green: the bid held against selling; red: the offer
+  held against buying
+- **Iceberg** (ice-blue diamond): on one venue's book, more than 1.5× a
+  level's displayed size traded against it, at least 10× the average print,
+  and the level refilled to at least half its size
+
+### Venues
+
+A study comparing the selected venues (needs All perps or All spot): last
+price against the median venue in basis points, share of the last minute's
+volume, one-minute delta, and lead / lag — the lag (in 250 ms steps, up to
+±2 s) at which a venue's price changes best correlate with the average of the
+other venues over the last 2.5 minutes. The venue with the clearest positive
+lead is named in the panel header.
+
+### Prior-session levels
+
+- Previous UTC day's POC, VAH, VAL and VWAP as long-dashed lines with `pPOC`,
+  `pVAH`, `pVAL` and `pVWAP` tags
+- Naked POCs from the last seven days — POCs no later day (or today so far)
+  traded back to — as dotted lines tagged `nPOC MM/DD`
+- Levels outside the visible ladder are pinned to the top or bottom edge with
+  an arrow and their price
+- Built from Binance 5-minute klines (perpetual or spot to match the market),
+  so they cover full days from the first load. VWAP is exact (quote ÷ base
+  volume); the profile spreads each bar's volume evenly across its range, so
+  POC and value area are approximations. Not available for Forex
+
 ### Traded-volume heatmap
 
 - Enabled by default in the Liquidity workspace; toggle it from the footprint header
@@ -208,6 +270,8 @@ The **Alerts** menu (bell) turns rules on per browser:
 | Block print | A print reaches 10× – 100× the session average |
 | CVD divergence | The 1-minute CVD and price change disagree in sign (both moves material) |
 | Large liquidation | A forced close of at least $100K / $250K / $1M (perpetuals) |
+| Absorption | An absorption marker is confirmed (see below) |
+| Iceberg | An iceberg marker is confirmed (see below) |
 
 Crossing rules wait for 50 session trades and repeat at most once per cooldown
 (10 s – 5 min). Alerts appear as toasts and in the menu's log, with an optional
@@ -457,6 +521,7 @@ components/
   RecordingsMenu.tsx       Record button and saved-session list
   ReplayBar.tsx            Replay transport (play, speed, seek, exit)
   ExportMenu.tsx           CSV and PNG export
+  VenuesPanel.tsx          Cross-venue price, flow and lead / lag
   ui/                      Shared primitives (cards, pills, menus) and icons
 
 hooks/
@@ -464,6 +529,7 @@ hooks/
   useNow.ts                Ticking clock for countdowns and rolling windows
   useMarketNow.ts          Wall clock live, virtual clock during replay
   useAlerts.ts             Builds alert snapshots and delivers alerts
+  usePriorSessions.ts      Fetches klines for prior-session levels
 
 lib/config/
   instruments.ts           Crypto instrument catalog and logo map
@@ -480,6 +546,10 @@ lib/engine/
                            ATR, Parkinson, session VWAP and tick sizing
   alerts.ts                Alert monitor and CVD divergence
   imbalance.ts             Imbalance and stacked-imbalance rules
+  depthHistory.ts          One-second resting-liquidity snapshots
+  microstructure.ts        Absorption and iceberg detectors
+  venues.ts                Per-venue buckets and lead / lag
+  priorSessions.ts         Prior-day levels and naked POCs from klines
   derivatives.ts           Open interest, funding, basis, regime and
                            liquidation aggregation
 
@@ -495,6 +565,9 @@ lib/recording/
   recorder.ts              Writes the event stream to storage in chunks
   player.ts                Replays a recording on a virtual clock
   storage.ts               IndexedDB storage (in-memory for tests)
+
+lib/render/
+  liquidityHeatmap.ts      Offscreen grid renderer for the depth heatmap
 
 lib/export/
   csv.ts                   CSV builders

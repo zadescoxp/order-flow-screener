@@ -44,6 +44,7 @@ const PANEL_ITEMS: { key: keyof PanelVisibility; label: string; hint: string; gr
   { key: "volumeZ", label: "Volume z-score", hint: "Unusual participation", group: "Studies" },
   { key: "openInterest", label: "Open interest", hint: "OI with price and regime (perps)", group: "Studies" },
   { key: "liquidations", label: "Liquidations", hint: "Forced longs / shorts per bucket (perps)", group: "Studies" },
+  { key: "venues", label: "Venues", hint: "Price, flow and lead / lag by venue", group: "Studies" },
   { key: "volatility", label: "Realized volatility", hint: "RV, ATR, Parkinson", group: "Studies" },
   { key: "depthOfMarket", label: "Market depth", hint: "Cumulative liquidity curve", group: "Studies" },
   { key: "orderBook", label: "Order book", hint: "Price ladder", group: "Sidebar" },
@@ -184,7 +185,7 @@ export default function TopBar() {
 
       <div className="topbar-group">
         <Segmented value={toolProfile} onChange={setToolProfile} options={PROFILES} ariaLabel="Workspace" />
-        <Menu label={<><Icon.Layout /><span className="hide-compact">Panels</span></>}>
+        <Menu hint="Panels" label={<><Icon.Layout /><span className="hide-compact">Panels</span></>}>
           {(["Chart", "Studies", "Sidebar"] as const).map((group) => (
             <MenuSection key={group} title={group}>
               {PANEL_ITEMS.filter((item) => item.group === group).map((item) => (
@@ -209,7 +210,8 @@ export default function TopBar() {
         href={REPO_URL}
         target="_blank"
         rel="noopener noreferrer"
-        title="View the source, open issues and send pull requests on GitHub"
+        aria-label="Contribute on GitHub"
+        data-hint="Contribute on GitHub"
       >
         <GitHubIcon size={15} />
         <span className="contribute-label">Contribute</span>

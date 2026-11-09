@@ -37,6 +37,9 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
   protected errorMessage: string | undefined;
   protected stateFlag: string | undefined;
   private intentionallyOffline = false;
+  /** Full in-memory book (price → size). Adapters with incremental books maintain these. */
+  protected bids = new Map<number, number>();
+  protected asks = new Map<number, number>();
 
   constructor(symbol: string) {
     super();
@@ -218,6 +221,14 @@ export abstract class BaseExchangeAdapter extends EventEmitter {
       any = true;
     }
     if (any) this.emit("derivatives", clean);
+  }
+
+  /**
+   * The deepest book this adapter holds, for the resting-liquidity heatmap.
+   * Emitted books are capped for the ladder; this is not. Null if empty.
+   */
+  depthSides(): { bids: ReadonlyMap<number, number>; asks: ReadonlyMap<number, number> } | null {
+    return this.bids.size || this.asks.size ? { bids: this.bids, asks: this.asks } : null;
   }
 
   getStatus(): VenueConnection {

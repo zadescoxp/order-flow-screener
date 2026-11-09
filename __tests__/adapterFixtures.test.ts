@@ -97,6 +97,22 @@ describe("exchange adapter payload fixtures", () => {
     });
   });
 
+  it.each([
+    ["Bitget futures", () => new BitgetFuturesAdapter("BTCUSDT")],
+    ["Bitget spot", () => new BitgetSpotAdapter("BTCUSDT")],
+  ])("normalizes %s v2 object trades and skips the snapshot push", (_name, make) => {
+    const adapter = make();
+    const trades: Array<{ id: string; price: number; quantity: number; side: string }> = [];
+    adapter.on("trade", (trade) => trades.push(trade));
+    const row = { ts: "1794229976284", price: "74726.9", size: "0.128", side: "sell", tradeId: "1503674994451562496" };
+    feed(adapter, { action: "snapshot", arg: { channel: "trade" }, data: [row] });
+    expect(trades).toHaveLength(0);
+    feed(adapter, { action: "update", arg: { channel: "trade" }, data: [row] });
+    expect(trades).toHaveLength(1);
+    expect(trades[0]).toMatchObject({ price: 74726.9, quantity: 0.128, side: "sell" });
+    expect(trades[0].id).toContain("1503674994451562496");
+  });
+
   it("normalizes Coinbase trades", () => {
     expectTrade(new CoinbaseSpotAdapter("BTC-USD"), {
       channel: "market_trades",

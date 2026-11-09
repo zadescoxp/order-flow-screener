@@ -12,10 +12,10 @@ import type {
   NormalizedOrderBook,
   NormalizedTrade,
 } from "@/lib/types/market";
-import type { RecordedEvent, RecordingChunk, RecordingMeta, RecordingStatus, RecordingStorage } from "./types";
+import type { RecordedDepth, RecordedEvent, RecordingChunk, RecordingMeta, RecordingStatus, RecordingStorage } from "./types";
 
 export const BOOK_INTERVAL_MS = 500;
-export const BOOK_LEVELS = 25;
+export const BOOK_LEVELS = 100; // enough to rebuild the liquidity heatmap on replay
 export const DERIVATIVES_INTERVAL_MS = 1000;
 export const CHUNK_INTERVAL_MS = 1000;
 export const MAX_CHUNK_EVENTS = 5000;
@@ -88,6 +88,10 @@ export class SessionRecorder implements MarketEventSink {
     if (at - last < DERIVATIVES_INTERVAL_MS) return;
     this.lastDerivatives.set(snapshot.venue, at);
     this.push([at, "d", snapshot]);
+  }
+
+  depth(snapshot: RecordedDepth, at: number): void {
+    this.push([at, "h", snapshot]);
   }
 
   close(): void {
@@ -175,7 +179,8 @@ function estimateBytes(events: RecordedEvent[]): number {
     if (kind === "b") {
       const book = payload as NormalizedOrderBook;
       bytes += 120 + (book.bids.length + book.asks.length) * 40;
-    } else bytes += kind === "t" ? 200 : 180;
+    } else if (kind === "h") bytes += 40 + (payload as RecordedDepth).index.length * 8;
+    else bytes += kind === "t" ? 200 : 180;
   }
   return bytes;
 }

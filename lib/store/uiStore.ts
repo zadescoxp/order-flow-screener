@@ -9,17 +9,17 @@ export const PROFILE_PANELS: Record<ToolProfile, PanelVisibility> = {
   "order-flow": {
     footprint: true, volumeProfile: true, heatmap: false, orderBook: true, obi: true,
     timeSales: true, cvd: true, volumeZ: true, volatility: false, depthOfMarket: false,
-    liquidations: true, openInterest: true,
+    liquidations: true, openInterest: true, venues: false,
   },
   liquidity: {
     footprint: true, volumeProfile: true, heatmap: true, orderBook: true, obi: true,
     timeSales: false, cvd: false, volumeZ: false, volatility: false, depthOfMarket: true,
-    liquidations: true, openInterest: false,
+    liquidations: true, openInterest: false, venues: true,
   },
   volatility: {
     footprint: true, volumeProfile: true, heatmap: false, orderBook: false, obi: false,
     timeSales: true, cvd: false, volumeZ: true, volatility: true, depthOfMarket: false,
-    liquidations: false, openInterest: true,
+    liquidations: false, openInterest: true, venues: false,
   },
 };
 
@@ -45,6 +45,10 @@ export interface IndicatorSettings {
   liquidations: boolean; // liquidation bubbles on the footprint (perpetuals)
   bigTrades: boolean; // big-print bubbles on the footprint
   bigTradeRatio: number; // 5 | 10 | 20 | 50 × the session average print
+  absorption: boolean; // absorption markers on the footprint
+  icebergs: boolean; // iceberg markers on the footprint
+  priorDay: boolean; // previous UTC day's POC / VAH / VAL / VWAP
+  nakedPocs: boolean; // untested POCs of earlier days
 }
 
 export const DEFAULT_INDICATORS: IndicatorSettings = {
@@ -67,6 +71,10 @@ export const DEFAULT_INDICATORS: IndicatorSettings = {
   liquidations: true,
   bigTrades: true,
   bigTradeRatio: 10,
+  absorption: true,
+  icebergs: true,
+  priorDay: true,
+  nakedPocs: true,
 };
 
 interface UIStore {
@@ -91,19 +99,20 @@ export const useUIStore = create<UIStore>()(
       toolProfile: "order-flow",
       panels: PROFILE_PANELS["order-flow"],
       theme: "dark",
-      heatmap: { tradedVolume: false },
+      heatmap: { tradedVolume: false, restingLiquidity: false },
       footprintMode: "bidask",
       indicators: DEFAULT_INDICATORS,
       setIndicator: (key, value) => set((state) => ({ indicators: { ...state.indicators, [key]: value } })),
       resetIndicators: () => set({ indicators: DEFAULT_INDICATORS }),
       setToolProfile: (toolProfile) => {
         const panels = PROFILE_PANELS[toolProfile];
-        set({ toolProfile, panels, heatmap: { tradedVolume: panels.heatmap } });
+        // The liquidity workspace shows resting depth; the others start without it.
+        set({ toolProfile, panels, heatmap: { tradedVolume: panels.heatmap, restingLiquidity: toolProfile === "liquidity" } });
       },
       setPanelVisible: (panel, visible) =>
         set((state) => ({
           panels: { ...state.panels, [panel]: visible },
-          heatmap: panel === "heatmap" ? { tradedVolume: visible } : state.heatmap,
+          heatmap: panel === "heatmap" ? { ...state.heatmap, tradedVolume: visible } : state.heatmap,
         })),
       setTheme: (theme) => {
         applyTheme(theme);
@@ -112,7 +121,7 @@ export const useUIStore = create<UIStore>()(
       setHeatmapVisible: (mode, visible) =>
         set((state) => ({
           heatmap: { ...state.heatmap, [mode]: visible },
-          panels: { ...state.panels, heatmap: visible },
+          panels: mode === "tradedVolume" ? { ...state.panels, heatmap: visible } : state.panels,
         })),
       setFootprintMode: (footprintMode) => set({ footprintMode }),
     }),
@@ -138,6 +147,7 @@ export const useUIStore = create<UIStore>()(
           ...saved,
           panels: { ...current.panels, ...(saved.panels ?? {}) },
           indicators: { ...DEFAULT_INDICATORS, ...(saved.indicators ?? {}) },
+          heatmap: { ...current.heatmap, ...(saved.heatmap ?? {}) },
         };
       },
     }

@@ -34,7 +34,7 @@ function Item({ label, hint, disabled, onClick }: { label: string; hint: string;
 
 export default function ExportMenu() {
   return (
-    <Menu label={<><Icon.Download /><span className="hide-compact">Export</span></>}>
+    <Menu hint="Export" label={<><Icon.Download /><span className="hide-compact">Export</span></>}>
       <ExportItems />
     </Menu>
   );

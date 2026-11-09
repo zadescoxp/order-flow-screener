@@ -120,6 +120,7 @@ export interface NormalizedOrderBook {
 
 export interface HeatmapSettings {
   tradedVolume: boolean;
+  restingLiquidity: boolean; // order-book depth over time behind the footprint
 }
 
 // ----------------------------------------------------------
@@ -315,6 +316,7 @@ export interface PanelVisibility {
   depthOfMarket: boolean;
   liquidations: boolean; // perpetuals only
   openInterest: boolean; // perpetuals only
+  venues: boolean; // cross-venue comparison (multi-venue selections)
 }
 
 // ----------------------------------------------------------

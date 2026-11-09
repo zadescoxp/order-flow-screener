@@ -17,6 +17,8 @@ const RULES: { id: AlertRuleId; label: string; hint: string; perpOnly?: boolean 
   { id: "blockPrint", label: "Block print", hint: "A print far above the average print" },
   { id: "cvdDivergence", label: "CVD divergence", hint: "1-minute CVD and price move apart" },
   { id: "liquidation", label: "Large liquidation", hint: "A forced close above a notional size", perpOnly: true },
+  { id: "absorption", label: "Absorption", hint: "Heavy aggressive volume at a price that held" },
+  { id: "iceberg", label: "Iceberg", hint: "A level that kept refilling after trading through its size" },
 ];
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -33,6 +35,7 @@ export default function AlertsMenu() {
   const enabled = useAlertStore((s) => Object.values(s.settings.rules).filter(Boolean).length);
   return (
     <Menu
+      hint={unread > 0 ? `Alerts · ${unread} new` : "Alerts"}
       buttonClassName={enabled ? "has-alerts" : ""}
       label={
         <>

@@ -41,7 +41,7 @@ export default function ReplayBar() {
         onClick={() => (playing ? session.replayPause() : session.replayPlay())}
         disabled={seeking}
         aria-label={playing ? "Pause" : ended ? "Play from start" : "Play"}
-        title={playing ? "Pause" : ended ? "Play from start" : "Play"}
+        data-hint={playing ? "Pause" : ended ? "Play from start" : "Play"}
       >
         {playing ? <Icon.Pause /> : <Icon.Play />}
       </button>
@@ -51,7 +51,7 @@ export default function ReplayBar() {
         onClick={() => void session.replaySeek(meta.startedAt)}
         disabled={seeking}
         aria-label="Restart"
-        title="Restart from the beginning"
+        data-hint="Restart"
       >
         <Icon.Restart />
       </button>
@@ -81,7 +81,7 @@ export default function ReplayBar() {
       <span className="replay-meta" title={`${meta.symbol} · ${venues} · recorded ${new Date(meta.startedAt).toLocaleString()}`}>
         {seeking ? "Seeking…" : ended ? "End of recording" : `${meta.symbol} · ${meta.selectedVenues.length > 1 ? `${meta.selectedVenues.length} venues` : venues}`}
       </span>
-      <button type="button" className="ui-button chip" onClick={() => session.exitReplay()} title="Stop the replay and return to the live feed">
+      <button type="button" className="ui-button chip" onClick={() => session.exitReplay()} data-hint="Back to the live feed">
         <Icon.Close /> Exit
       </button>
     </section>

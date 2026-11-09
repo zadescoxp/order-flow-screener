@@ -82,6 +82,40 @@ describe("derivatives pipeline", () => {
     manager.disconnect();
   });
 
+  it("samples depth each second, tracks venues and reports absorption to the store", () => {
+    const store = createTerminalStore();
+    const manager = new MarketDataManager(store);
+    manager.subscribe("all-perps", "BTCUSDT", "perpetual", "1m", 10, 3, ["bybit-futures", "okx-futures"]);
+    const bybit = fakes.get("bybit-futures")!;
+    const okx = fakes.get("okx-futures")!;
+    const t0 = Date.now();
+    const book = (venue: string, bid: number) => ({ venue, symbol: "BTCUSDT", timestamp: t0, localTimestamp: t0, bids: [{ price: bid, size: 2 }], asks: [{ price: bid + 10, size: 3 }] });
+    bybit.emit("orderbook", book("bybit-futures", 50_000));
+    okx.emit("orderbook", book("okx-futures", 50_000));
+    // Seven 10 s windows of quiet two-sided flow, then heavy selling into one bid that holds.
+    let n = 0;
+    const emit = (venue: "bybit-futures" | "okx-futures", price: number, quantity: number, side: "buy" | "sell", timestamp: number) =>
+      fakes.get(venue)!.emit("trade", { ...trade(venue, price, timestamp), id: `${venue}-${++n}`, quantity, quoteVolume: price * quantity, side });
+    for (let w = 0; w < 7; w++) {
+      for (let i = 0; i < 10; i++) emit(i % 2 ? "bybit-futures" : "okx-futures", 50_000 + (i % 2) * 10, 1, i % 2 ? "buy" : "sell", t0 + w * 10_000 + i * 500);
+    }
+    for (let i = 0; i < 40; i++) emit("bybit-futures", 50_000, 1, "sell", t0 + 70_000 + i * 100);
+    emit("okx-futures", 50_010, 1, "buy", t0 + 80_500);
+    jest.advanceTimersByTime(2_100);
+
+    const state = store.getState();
+    expect(manager.depthHistory.size).toBeGreaterThan(0);
+    expect(state.depthVersion).toBe(manager.depthHistory.version);
+    const snap = manager.depthHistory.get(manager.depthHistory.lastSeq)!;
+    // Both venues' bids sum into one bucket at the resolved tick.
+    const bidIndex = Math.round(50_000 / manager.depthHistory.tick);
+    expect(snap.size[[...snap.index].indexOf(bidIndex)]).toBe(4);
+    expect(Object.keys(state.venueBuckets).sort()).toEqual(["bybit-futures", "okx-futures"]);
+    expect(state.microEvents.filter((e) => e.kind === "absorption").map((e) => [e.side, e.price])).toContainEqual(["bid", 50_000]);
+    manager.disconnect();
+    expect(manager.depthHistory.size).toBe(0);
+  });
+
   it("does not sample open interest for spot markets", () => {
     const store = createTerminalStore();
     const manager = new MarketDataManager(store);

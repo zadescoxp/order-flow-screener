@@ -14,6 +14,8 @@ const RULE_ICON: Record<AlertRuleId, () => React.ReactElement> = {
   blockPrint: Icon.Box,
   cvdDivergence: Icon.Diverge,
   liquidation: Icon.Flame,
+  absorption: Icon.Shield,
+  iceberg: Icon.Snowflake,
 };
 
 // One alert: rule glyph, a meta line (rule · symbol · time), the headline
@@ -49,7 +51,7 @@ export function AlertCard({
         <div className="alert-detail">{alert.body}</div>
       </div>
       {onDismiss && (
-        <button type="button" className="alert-close" aria-label="Dismiss alert" onClick={onDismiss}>
+        <button type="button" className="alert-close" aria-label="Dismiss alert" data-hint="Dismiss" onClick={onDismiss}>
           <Icon.Close />
         </button>
       )}

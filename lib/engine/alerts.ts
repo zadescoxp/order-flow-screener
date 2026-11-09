@@ -6,6 +6,7 @@
 // ============================================================
 
 import type { FlowBar, NormalizedLiquidation, NormalizedTrade } from "@/lib/types/market";
+import type { MicroEvent } from "@/lib/engine/microstructure";
 
 export type AlertRuleId =
   | "vwapCross"
@@ -14,7 +15,9 @@ export type AlertRuleId =
   | "stackedImbalance"
   | "blockPrint"
   | "cvdDivergence"
-  | "liquidation";
+  | "liquidation"
+  | "absorption"
+  | "iceberg";
 
 export interface AlertSettings {
   rules: Record<AlertRuleId, boolean>;
@@ -35,6 +38,8 @@ export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
     blockPrint: false,
     cvdDivergence: false,
     liquidation: false,
+    absorption: false,
+    iceberg: false,
   },
   volumeZThreshold: 3,
   blockPrintRatio: 20,
@@ -69,6 +74,8 @@ export const ALERT_RULE_LABEL: Record<AlertRuleId, string> = {
   blockPrint: "Block print",
   cvdDivergence: "CVD",
   liquidation: "Liquidation",
+  absorption: "Absorption",
+  iceberg: "Iceberg",
 };
 
 export interface StackedRun {
@@ -92,6 +99,7 @@ export interface AlertSnapshot {
   divergence: "bullish" | "bearish" | null;
   newTrades: NormalizedTrade[];
   newLiquidations: NormalizedLiquidation[];
+  newMicro: MicroEvent[];
   format: (price: number) => string;
 }
 
@@ -239,6 +247,23 @@ export class AlertMonitor {
           tone: largest.side === "long" ? "sell" : "buy",
         });
       }
+    }
+
+    // ── Absorption / iceberg detections ──
+    for (const ev of s.newMicro) {
+      const rule: AlertRuleId = ev.kind;
+      if (!rules[rule]) continue;
+      const held = ev.side === "bid" ? "bid" : "offer";
+      fire(`${rule}:${ev.side}:${ev.price}`, cooldown, {
+        rule,
+        title: `${ev.kind === "absorption" ? "Absorption" : "Iceberg"} at the ${held} ${s.format(ev.price)}`,
+        headline: `${ev.side === "bid" ? "Bid" : "Offer"} ${ev.kind === "absorption" ? "absorbing" : "refilling"}`,
+        figure: s.format(ev.price),
+        body: ev.kind === "absorption"
+          ? `${compact(ev.volume)} hit the level · ${ev.ratio.toFixed(1)}× avg window`
+          : `${ev.ratio.toFixed(1)}× its displayed size traded · $${compact(ev.notional)}`,
+        tone: ev.side === "bid" ? "buy" : "sell",
+      });
     }
 
     return out;
