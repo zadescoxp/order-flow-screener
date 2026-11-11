@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useFitDensity } from "@/hooks/useFitDensity";
 import { useSessionStore } from "@/lib/session/SessionContext";
 import type { PanelVisibility, Timeframe, ToolProfile, Venue, VenueSelection } from "@/lib/types/market";
 import { FOREX_SYMBOLS } from "@/lib/config/venues";
@@ -57,6 +58,8 @@ const PANEL_ITEMS: { key: keyof PanelVisibility; label: string; hint: string; gr
 ];
 
 export default function TopBar() {
+  // 0: full labels · 1: icon-only tools · 2: compact Contribute · 3: two rows.
+  const { ref: topbarRef } = useFitDensity<HTMLElement>(3);
   const symbol = useSessionStore((s) => s.symbol);
   const venue = useSessionStore((s) => s.venue);
   const marketType = useSessionStore((s) => s.marketType);
@@ -167,7 +170,7 @@ export default function TopBar() {
   };
 
   return (
-    <header className="topbar">
+    <header className="topbar" ref={topbarRef}>
       <Link className="brand" href="/" aria-label="orderflow home">
         <Wordmark size={28} />
       </Link>
