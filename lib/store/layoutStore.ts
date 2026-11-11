@@ -122,7 +122,7 @@ export const useLayoutStore = create<LayoutStore>()(
       load: (id) => {
         const entry = get().saved.find((s) => s.id === id);
         if (!entry) return;
-        set({ layout: sanitizeLayout(entry.layout), activeId: id, dirty: false, mode: "grid" });
+        set({ layout: fitToScreen(sanitizeLayout(entry.layout)), activeId: id, dirty: false, mode: "grid" });
       },
 
       rename: (id, rawName) => {
@@ -155,9 +155,9 @@ export const useLayoutStore = create<LayoutStore>()(
           ? p.saved
               .filter((s): s is SavedLayout => !!s && typeof s.id === "string" && typeof s.name === "string")
               .slice(0, MAX_SAVED_LAYOUTS)
-              .map((s) => ({ ...s, name: cleanName(s.name) || "Untitled", layout: sanitizeLayout(s.layout) }))
+              .map((s) => ({ ...s, name: cleanName(s.name) || "Untitled", layout: fitToScreen(sanitizeLayout(s.layout)) }))
           : [];
-        const layout = sanitizeLayout(p.layout);
+        const layout = fitToScreen(sanitizeLayout(p.layout));
         return {
           ...current,
           mode: p.mode === "grid" ? "grid" : "classic",
