@@ -45,6 +45,7 @@ export interface IndicatorSettings {
   liquidations: boolean; // liquidation bubbles on the footprint (perpetuals)
   bigTrades: boolean; // big-print bubbles on the footprint
   bigTradeRatio: number; // 5 | 10 | 20 | 50 × the session average print
+  venueBadges: boolean; // exchange logo on each bubble when several venues are aggregated
   absorption: boolean; // absorption markers on the footprint
   icebergs: boolean; // iceberg markers on the footprint
   priorDay: boolean; // previous UTC day's POC / VAH / VAL / VWAP
@@ -71,6 +72,7 @@ export const DEFAULT_INDICATORS: IndicatorSettings = {
   liquidations: true,
   bigTrades: true,
   bigTradeRatio: 10,
+  venueBadges: true,
   absorption: true,
   icebergs: true,
   priorDay: true,
