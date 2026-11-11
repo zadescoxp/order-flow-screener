@@ -8,6 +8,8 @@ import AlertToasts from "@/components/AlertToasts";
 import ReplayBar from "@/components/ReplayBar";
 import { MarketSessionProvider, useSessionStore } from "@/lib/session/SessionContext";
 import { useUIStore } from "@/lib/store/uiStore";
+import { useLayoutStore } from "@/lib/store/layoutStore";
+import GridWorkspace from "@/components/GridWorkspace";
 import { applyTheme } from "@/lib/theme";
 import TopBar from "@/components/TopBar";
 import MarketStatsBar from "@/components/MarketStatsBar";
@@ -70,7 +72,10 @@ function SessionTerminal() {
   useEffect(() => {
     void useUIStore.persist.rehydrate();
     void useAlertStore.persist.rehydrate();
+    void useLayoutStore.persist.rehydrate();
   }, []);
+
+  const layoutMode = useLayoutStore((s) => s.mode);
 
   useLayoutEffect(() => {
     applyTheme(theme);
@@ -95,6 +100,9 @@ function SessionTerminal() {
       <ReplayBar />
       <MarketStatsBar />
 
+      {layoutMode === "grid" ? (
+        <GridWorkspace />
+      ) : (
       <div className="workspace">
         <div className="workspace-main">
           <div className="chart-area">
@@ -143,6 +151,7 @@ function SessionTerminal() {
           </aside>
         )}
       </div>
+      )}
 
       <StatusBar />
       <AlertToasts />
