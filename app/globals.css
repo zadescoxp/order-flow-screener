@@ -148,6 +148,7 @@ button, select, input { font: inherit; color: inherit; }
 .ui-button.is-primary:hover { background: color-mix(in srgb, var(--accent), white 18%); color: var(--on-accent); }
 .ui-button.chip { height: 26px; padding: 0 11px; font-size: 12px; background: transparent; }
 .ui-button.chip.is-active { background: var(--bg-active); border-color: transparent; }
+.ui-button.chip.is-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
 .ui-select {
   height: 32px;
@@ -320,6 +321,8 @@ button, select, input { font: inherit; color: inherit; }
 .picker-option-text span { color: var(--text-primary); font-size: 13px; font-weight: 500; }
 .picker-option-text small { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .picker-check { color: var(--accent); font-size: 8px; }
+.picker-group { position: sticky; top: 0; z-index: 1; padding: 8px 8px 4px; background: var(--bg-panel); color: var(--text-muted); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.picker-trailing { margin-left: auto; padding-left: 8px; color: var(--text-muted); font-family: var(--font-mono); font-size: 10.5px; white-space: nowrap; }
 .picker-empty { padding: 16px; color: var(--text-muted); text-align: center; }
 
 /* ─── Indicators menu ─── */
@@ -718,3 +721,102 @@ body.is-resizing-row, .is-resizing-row * { cursor: row-resize !important; }
 .menu-popover.is-portal > .alerts-menu,
 .menu-popover.is-portal > .export-menu,
 .menu-popover.is-portal > .recordings-menu { max-height: none; overflow: visible; }
+
+/* ─── Custom grid workspace ─── */
+.grid-workspace { position: relative; display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
+.grid-scroll { position: relative; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
+.grid-cell { display: flex; min-width: 0; min-height: 0; }
+.grid-cell > .panel { flex: 1; }
+.react-grid-item.react-grid-placeholder { background: var(--accent); opacity: 0.12; border-radius: var(--radius-card); transition-duration: 120ms; }
+.react-grid-item.resizing, .react-grid-item.react-draggable-dragging { z-index: 4; box-shadow: 0 24px 60px var(--shadow); border-radius: var(--radius-card); }
+.react-grid-item > .react-resizable-handle { z-index: 5; opacity: 0; transition: opacity 0.15s; }
+.grid-workspace.is-editing .react-grid-item > .react-resizable-handle { opacity: 1; }
+.react-grid-item > .react-resizable-handle::after { border-color: var(--accent) !important; width: 8px !important; height: 8px !important; right: 5px !important; bottom: 5px !important; border-width: 0 2.5px 2.5px 0 !important; }
+.react-grid-item > .react-resizable-handle-e::after, .react-grid-item > .react-resizable-handle-s::after { display: none; }
+
+.grid-edit-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  border: 1.5px dashed color-mix(in srgb, var(--accent), transparent 35%);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--bg-base), transparent 30%);
+  backdrop-filter: blur(2px);
+  cursor: grab;
+}
+.react-draggable-dragging .grid-edit-overlay { cursor: grabbing; border-style: solid; }
+.grid-edit-label { display: flex; flex-direction: column; align-items: center; gap: 2px; pointer-events: none; }
+.grid-edit-label strong { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.grid-edit-label span { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.grid-edit-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.grid-edit-remove:hover { color: var(--sell); border-color: var(--sell); }
+
+.grid-edit-bar { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 6px 8px 6px 14px; border: 1px solid color-mix(in srgb, var(--accent), transparent 60%); border-radius: 999px; background: var(--bg-panel); }
+.grid-edit-bar-title { font-size: 13px; font-weight: 600; color: var(--accent); }
+.grid-edit-bar-hint { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+
+.grid-add-menu { display: flex; flex-direction: column; width: 270px; max-height: min(420px, 60vh); overflow-y: auto; }
+.grid-add-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 10px; border: 0; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; }
+.grid-add-item:hover { background: var(--bg-hover); }
+.grid-add-item span { color: var(--text-primary); font-size: 13px; }
+.grid-add-item small { color: var(--text-muted); font-size: 11.5px; }
+.grid-add-empty { padding: 12px; color: var(--text-muted); font-size: 12px; }
+
+.grid-placeholder { align-items: center; justify-content: center; gap: 4px; color: var(--text-muted); font-size: 12px; text-align: center; }
+.grid-placeholder strong { color: var(--text-secondary); font-size: 13px; font-weight: 600; }
+
+.grid-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 100%; min-height: 300px; border: 1.5px dashed var(--border); border-radius: var(--radius-card); color: var(--text-muted); font-size: 13px; }
+.grid-empty strong { color: var(--text-primary); font-size: 15px; }
+.grid-empty-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+.grid-stack { display: flex; flex-direction: column; gap: var(--gap); padding-bottom: var(--gap); }
+.grid-stack .grid-cell { height: clamp(300px, 52vh, 560px); }
+.grid-stack .grid-cell[data-panel="footprint"] { height: clamp(420px, 70vh, 760px); }
+.grid-stack .grid-cell[data-panel="obi"] { height: 220px; }
+
+/* ─── Layout menu ─── */
+.layout-menu { display: flex; flex-direction: column; gap: 4px; width: 320px; max-height: min(640px, 78vh); overflow-y: auto; }
+.layout-menu-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 6px 8px; }
+.layout-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 2px 6px 6px; }
+.layout-preset { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel-alt); color: var(--text-secondary); font-size: 11.5px; cursor: pointer; }
+.layout-preset:hover { border-color: color-mix(in srgb, var(--accent), transparent 50%); color: var(--text-primary); }
+.layout-thumb { width: 100%; height: 44px; }
+.layout-thumb rect { fill: var(--bg-active); }
+.layout-thumb rect.is-main { fill: color-mix(in srgb, var(--accent), transparent 55%); }
+.layout-saved { display: flex; align-items: center; gap: 4px; padding: 0 4px; border-radius: 9px; }
+.layout-saved.is-active { background: var(--highlight-dim); }
+.layout-saved-load { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; padding: 6px; border: 0; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.layout-saved-load .layout-thumb { width: 34px; height: 24px; flex: none; }
+.layout-saved-name { flex: 1; min-width: 0; overflow: hidden; font-size: 13px; white-space: nowrap; text-overflow: ellipsis; }
+.layout-saved-load small { color: var(--text-muted); font-size: 11px; }
+.layout-saved-delete { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.layout-saved-delete:hover { color: var(--sell); background: var(--bg-hover); }
+.layout-update { margin: 6px; }
+.layout-empty { padding: 4px 10px 8px; color: var(--text-muted); font-size: 12px; }
+.layout-save { display: flex; gap: 6px; padding: 8px 6px 4px; border-top: 1px solid var(--border-muted); }
+.layout-save input { flex: 1; min-width: 0; height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-panel-alt); color: var(--text-primary); font-size: 12.5px; outline: none; }
+.layout-save input:focus { border-color: color-mix(in srgb, var(--accent), transparent 40%); }
+.layout-error { padding: 2px 10px; color: var(--sell); font-size: 11.5px; }
+.layout-footnote { padding: 4px 10px 6px; color: var(--text-muted); font-size: 11px; }
+.layout-dirty { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+
+@media (max-width: 900px) {
+  .grid-workspace { min-height: auto; }
+  .grid-scroll { overflow: visible; }
+  .grid-edit-bar-hint { display: none; }
+}
