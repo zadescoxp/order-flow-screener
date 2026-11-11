@@ -1,4 +1,4 @@
-import { badgePosition, badgeSize, drawVenueBadge, MIN_TRADE_BADGE_RADIUS, selectBadged } from "@/lib/render/venueBadges";
+import { badgePosition, badgeSize, badgeStyle, drawVenueBadge, MIN_TRADE_BADGE_RADIUS, selectBadged } from "@/lib/render/venueBadges";
 import type { Palette } from "@/hooks/useCanvas";
 
 const palette = { bgPanel: "#111215" } as Palette;
@@ -6,17 +6,25 @@ const palette = { bgPanel: "#111215" } as Palette;
 function fakeContext() {
   const calls: { method: string; args: unknown[]; fillStyle?: unknown }[] = [];
   const ctx: Record<string, unknown> = { fillStyle: "", font: "", textAlign: "", textBaseline: "" };
-  for (const method of ["save", "restore", "beginPath", "arc", "fill", "clip", "drawImage", "fillText"]) {
+  for (const method of ["save", "restore", "beginPath", "arc", "roundRect", "fill", "clip", "drawImage", "fillText"]) {
     ctx[method] = (...args: unknown[]) => calls.push({ method, args, fillStyle: ctx.fillStyle });
   }
   return { ctx: ctx as unknown as CanvasRenderingContext2D, calls };
 }
 
 describe("venue badges", () => {
-  it("keeps badges readable on small bubbles and modest on large ones", () => {
-    expect(badgeSize(3)).toBe(12);
-    expect(badgeSize(14)).toBe(14);
-    expect(badgeSize(200)).toBe(16);
+  it("keeps badges large enough to recognise and caps them on big bubbles", () => {
+    expect(badgeSize(3)).toBe(18);
+    expect(badgeSize(14)).toBe(21);
+    expect(badgeSize(200)).toBe(24);
+  });
+
+  it("maps venue ids to brand styles without white tiles", () => {
+    for (const venue of ["binance-futures", "bybit-spot", "okx-futures", "bitget-spot", "coinbase-spot", "deribit", "hyperliquid"]) {
+      expect(badgeStyle(venue).tile.toLowerCase()).not.toBe("#ffffff");
+    }
+    expect(badgeStyle("binance-spot")).toBe(badgeStyle("binance-futures"));
+    expect(badgeStyle("deribit").glyph).toBe("/venues/mono/deribit.png");
   });
 
   it("pins the badge to the bubble's top-right edge", () => {
@@ -50,7 +58,7 @@ describe("venue badges", () => {
   it.each([
     ["hyperliquid", "H"],
     ["deribit", "D"],
-  ])("draws a monogram for %s, which has no logo file", (venue, letter) => {
+  ])("draws a letter for %s when no glyph is available yet", (venue, letter) => {
     const { ctx, calls } = fakeContext();
     drawVenueBadge(ctx, venue, 50, 50, 6, palette);
     expect(calls.some((c) => c.method === "drawImage")).toBe(false);
