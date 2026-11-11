@@ -34,7 +34,21 @@ export const VENUE_CONFIG: Record<Venue, VenueConfig | undefined> = {
   },
 };
 
-export const FOREX_SYMBOLS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD"] as const;
+// Pairs the Finnhub (OANDA) stream was observed sending ticks for, majors
+// first. Gold and silver are served as perpetuals instead (see METALS in
+// lib/config/instruments.ts): their Finnhub ticks are too sparse for order flow.
+export const FOREX_SYMBOLS = [
+  "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD", "NZD/USD",
+  "AUD/JPY", "NZD/JPY", "GBP/CHF", "SGD/CHF", "EUR/NOK", "EUR/TRY", "GBP/HKD", "NZD/HKD",
+  "USD/NOK", "USD/DKK", "USD/SGD", "USD/PLN", "USD/CZK",
+] as const;
+
+const MAJORS = new Set(["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD", "NZD/USD"]);
+
+/** Picker grouping for FX pairs. */
+export const FOREX_GROUPS: Record<string, "Majors" | "Crosses"> = Object.fromEntries(
+  FOREX_SYMBOLS.map((pair) => [pair, MAJORS.has(pair) ? "Majors" : "Crosses"])
+);
 
 export function isForexVenue(venue: Venue): boolean {
   return VENUE_CONFIG[venue]?.assetClass === "forex";
