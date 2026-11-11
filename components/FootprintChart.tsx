@@ -432,7 +432,7 @@ export default function FootprintChart() {
       // Only useful when several venues are aggregated; crowded candles badge
       // liquidations and the largest prints without overlapping.
       if (ind.venueBadges && selectedVenues.length > 1) {
-        for (const bubble of selectBadged(bubbles)) {
+        for (const bubble of selectBadged(bubbles, (b) => (b.kind === "trade" ? b.trade.venue : b.liq.venue))) {
           const venue = bubble.kind === "trade" ? bubble.trade.venue : bubble.liq.venue;
           bubble.badge = drawVenueBadge(ctx, venue, bubble.x, bubble.y, bubble.r, p);
         }
