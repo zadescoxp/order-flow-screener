@@ -92,7 +92,8 @@ export default function TopBar() {
       value,
       label: asset.kind === "metal" ? `${asset.base}/USDT` : value,
       sub: asset.name,
-      keywords: `${asset.base} ${asset.name}`,
+      // Common spellings: "BTCUSD", and for metals "XAUUSD" / "XAUSD".
+      keywords: `${asset.base} ${asset.name} ${asset.base}USD${asset.kind === "metal" ? ` ${asset.base}SD` : ""}`,
       icon: <AssetLogo symbol={value} size={22} />,
       group: asset.kind === "metal" ? "Metals" : "Crypto",
       trailing: `${venues} venue${venues === 1 ? "" : "s"}`,
@@ -111,7 +112,7 @@ export default function TopBar() {
           value: `${METAL_PREFIX}${metal.base}USDT`,
           label: `${metal.base}/USD`,
           sub: `${metal.name} · perpetual order flow`,
-          keywords: `${metal.base} ${metal.name}`,
+          keywords: `${metal.base} ${metal.name} ${metal.base}USD ${metal.base}USDT ${metal.base}SD`,
           icon: <AssetLogo symbol={`${metal.base}USDT`} size={22} />,
           group: "Metals",
           trailing: `${metal.perp.length} venues`,
