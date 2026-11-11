@@ -7,15 +7,16 @@ export function AssetLogo({ symbol, size = 20 }: { symbol: string; size?: number
   if (asset?.logo) {
     return <img className="asset-logo" src={`/coins/${base.toLowerCase()}.svg`} alt="" width={size} height={size} />;
   }
-  // Monogram fallback (FX pairs and coins without a bundled logo).
+  // Monogram fallback (FX pairs, metals and coins without a bundled logo).
   const color = asset?.color ?? "var(--bg-active)";
+  const element = asset?.kind === "metal" ? (base === "XAU" ? "Au" : base === "XAG" ? "Ag" : null) : null;
   return (
     <span
       className="asset-logo asset-monogram"
       style={{ width: size, height: size, fontSize: Math.max(7, size * 0.38), background: color }}
       aria-hidden
     >
-      {base.slice(0, base.length > 3 ? 2 : 3)}
+      {element ?? base.slice(0, base.length > 3 ? 2 : 3)}
     </span>
   );
 }
