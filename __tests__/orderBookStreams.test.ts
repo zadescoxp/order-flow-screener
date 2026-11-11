@@ -2,7 +2,7 @@ import { DeribitAdapter, OKXFuturesAdapter, OKXSpotAdapter } from "@/lib/adapter
 import type { BaseExchangeAdapter } from "@/lib/adapters/base";
 import type { NormalizedOrderBook, VenueConnection } from "@/lib/types/market";
 import { venueSupports, venuesForSelection } from "@/lib/adapters/capabilities";
-import { CRYPTO_SYMBOLS } from "@/lib/config/instruments";
+import { CRYPTO_ASSETS, CRYPTO_SYMBOLS } from "@/lib/config/instruments";
 
 function feed(adapter: BaseExchangeAdapter, payload: unknown): void {
   (adapter as unknown as { handleMessage: (message: unknown) => void }).handleMessage(payload);
@@ -70,10 +70,32 @@ describe("Deribit book channel", () => {
 });
 
 describe("instrument coverage", () => {
-  it("lists the expanded set of perpetuals on the major venues", () => {
-    expect(CRYPTO_SYMBOLS.length).toBeGreaterThanOrEqual(25);
-    for (const symbol of CRYPTO_SYMBOLS) {
-      expect(venueSupports("binance-futures", symbol, "perpetual")).toBe(true);
+  const MAJOR_SPOT = ["binance-spot", "bybit-spot", "okx-spot", "coinbase-spot"];
+
+  it("only lists markets that met the live-activity rule", () => {
+    expect(CRYPTO_SYMBOLS.length).toBeGreaterThanOrEqual(100);
+    for (const asset of CRYPTO_ASSETS) {
+      const symbol = `${asset.base}USDT`;
+      const perpVenues = venuesForSelection("all-perps", "perpetual", symbol);
+      const spotVenues = venuesForSelection("all-spot", "spot", symbol);
+      expect(perpVenues.length + spotVenues.length).toBeGreaterThan(0);
+      if (perpVenues.length) expect(perpVenues.filter((v) => v !== "deribit").length).toBeGreaterThanOrEqual(3);
+      if (spotVenues.length) expect(spotVenues.filter((v) => MAJOR_SPOT.includes(v)).length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("offers gold and silver as aggregated perpetuals", () => {
+    for (const symbol of ["XAUUSDT", "XAGUSDT"]) {
+      expect(venuesForSelection("all-perps", "perpetual", symbol)).toEqual(
+        expect.arrayContaining(["binance-futures", "bybit-futures", "okx-futures", "bitget-futures"])
+      );
+      expect(venuesForSelection("all-spot", "spot", symbol)).toEqual([]);
+    }
+  });
+
+  it("excludes tokenized stocks and ETFs", () => {
+    for (const symbol of ["NVDAUSDT", "QQQUSDT", "TSLAUSDT"]) {
+      expect(venueSupports("binance-futures", symbol, "perpetual")).toBe(false);
     }
   });
 

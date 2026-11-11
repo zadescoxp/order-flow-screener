@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icons";
 
 export interface PickerOption<T extends string> {
@@ -10,6 +10,24 @@ export interface PickerOption<T extends string> {
   icon?: ReactNode;
   disabled?: boolean;
   keywords?: string;
+  group?: string; // consecutive options with the same group get one heading
+  trailing?: ReactNode; // right-aligned detail, e.g. venue count
+}
+
+const compact = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * Case-insensitive search that also ignores separators, so "xauusd",
+ * "XAU/USD", "eur usd" and "eur-usd" all match the same option. Every
+ * whitespace-separated word must match somewhere.
+ */
+export function matchesSearch(query: string, haystack: string): boolean {
+  const text = haystack.toLowerCase();
+  const textCompact = compact(haystack);
+  const whole = compact(query);
+  if (whole && textCompact.includes(whole)) return true;
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.every((word) => text.includes(word) || (compact(word) !== "" && textCompact.includes(compact(word))));
 }
 
 /** Pill button that opens a searchable list; replaces native selects where options need icons. */
@@ -41,9 +59,8 @@ export function Picker<T extends string>({
   const current = options.find((option) => option.value === value);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter((o) => `${o.label} ${o.sub ?? ""} ${o.keywords ?? ""}`.toLowerCase().includes(q));
+    if (!query.trim()) return options;
+    return options.filter((o) => matchesSearch(query, `${o.label} ${o.sub ?? ""} ${o.keywords ?? ""}`));
   }, [options, query]);
 
   useEffect(() => {
@@ -107,6 +124,8 @@ export function Picker<T extends string>({
               <Icon.Search />
               <input
                 ref={input}
+                // Focus on open so the first keystroke lands in the search.
+                autoFocus
                 value={query}
                 placeholder="Search"
                 onChange={(e) => { setQuery(e.target.value); setActive(0); }}
@@ -118,9 +137,12 @@ export function Picker<T extends string>({
           <div className="picker-list" role="listbox" ref={list} aria-label={ariaLabel}>
             {filtered.length === 0 && <div className="picker-empty">No matches</div>}
             {filtered.map((option, index) => (
+              <Fragment key={option.value}>
+              {option.group && option.group !== filtered[index - 1]?.group && (
+                <div className="picker-group" role="presentation">{option.group}</div>
+              )}
               <button
                 type="button"
-                key={option.value}
                 data-index={index}
                 role="option"
                 aria-selected={option.value === value}
@@ -134,8 +156,10 @@ export function Picker<T extends string>({
                   <span>{option.label}</span>
                   {option.sub && <small>{option.sub}</small>}
                 </span>
+                {option.trailing && <span className="picker-trailing">{option.trailing}</span>}
                 {option.value === value && <span className="picker-check" aria-hidden>●</span>}
               </button>
+              </Fragment>
             ))}
           </div>
         </div>

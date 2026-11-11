@@ -1,5 +1,11 @@
 # Order Flow Tracker
 
+**v2.3** — venue logos on liquidation and block-print bubbles, 122 verified
+coins plus gold and silver perps and 20 FX pairs, and custom grid layouts you
+can save:
+
+![orderflow. v2.3 terminal: venue badges on footprint bubbles over the liquidity heatmap, the grouped instrument picker with gold and silver, the grid layout menu with presets and saved layouts, and block print alerts](docs/media/orderflow-v2.3-demo.gif)
+
 **v2.2** — resting-liquidity heatmap, absorption and iceberg markers, venues
 comparison, prior-session levels, liquidations, open interest and funding,
 alerts, replay and export:

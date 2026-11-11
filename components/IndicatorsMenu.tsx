@@ -132,6 +132,7 @@ export default function IndicatorsMenu() {
             />
           </Row>
           {toggle("liquidations", "Liquidations", "Forced closes, ringed, sized by notional (perps)")}
+          {toggle("venueBadges", "Venue logos", "Show which exchange each bubble came from (multi-venue)")}
         </MenuSection>
 
         <MenuSection title="Microstructure">

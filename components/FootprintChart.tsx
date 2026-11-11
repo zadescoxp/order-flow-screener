@@ -13,14 +13,16 @@ import { ARRIVAL_SLACK_MS } from "@/lib/engine/derivatives";
 import { imbalanceOf, stackedRuns } from "@/lib/engine/imbalance";
 import { DEPTH_CAPACITY } from "@/lib/engine/depthHistory";
 import { LiquidityHeatmapRenderer } from "@/lib/render/liquidityHeatmap";
+import { drawVenueBadge, onVenueLogosReady, preloadVenueLogos, selectBadged } from "@/lib/render/venueBadges";
 import type { MicroEvent } from "@/lib/engine/microstructure";
 import { useMarketSession } from "@/lib/session/SessionContext";
 import { usePriorSessions } from "@/hooks/usePriorSessions";
 import type { BigTrade, FootprintCandle, NormalizedLiquidation, VolumeProfile } from "@/lib/types/market";
 
+type BadgeHit = { x: number; y: number; r: number };
 type Bubble =
-  | { x: number; y: number; r: number; kind: "liquidation"; liq: NormalizedLiquidation }
-  | { x: number; y: number; r: number; kind: "trade"; trade: BigTrade };
+  | { x: number; y: number; r: number; badge?: BadgeHit; kind: "liquidation"; liq: NormalizedLiquidation }
+  | { x: number; y: number; r: number; badge?: BadgeHit; kind: "trade"; trade: BigTrade };
 const MAX_BUBBLES = 400;
 const ICE = "#7dd3fc";
 
@@ -119,6 +121,7 @@ export default function FootprintChart() {
   const marketType = useSessionStore((s) => s.marketType);
   const liquidations = useSessionStore((s) => s.liquidations);
   const bigTrades = useSessionStore((s) => s.bigTrades);
+  const selectedVenues = useSessionStore((s) => s.selectedVenues);
   const microEvents = useSessionStore((s) => s.microEvents);
   const depthVersion = useSessionStore((s) => s.depthVersion);
   const marketSession = useMarketSession();
@@ -425,6 +428,15 @@ export default function FootprintChart() {
           bubbles.push({ x, y, r, kind: "liquidation", liq });
         }
       }
+      // Venue badges go on top of the bubbles, so none is hidden by a later one.
+      // Only useful when several venues are aggregated; crowded candles badge
+      // liquidations and the largest prints without overlapping.
+      if (ind.venueBadges && selectedVenues.length > 1) {
+        for (const bubble of selectBadged(bubbles, (b) => (b.kind === "trade" ? b.trade.venue : b.liq.venue))) {
+          const venue = bubble.kind === "trade" ? bubble.trade.venue : bubble.liq.venue;
+          bubble.badge = drawVenueBadge(ctx, venue, bubble.x, bubble.y, bubble.r, p);
+        }
+      }
       bubblesRef.current = bubbles;
 
       // ── Absorption and iceberg markers ──
@@ -665,10 +677,16 @@ export default function FootprintChart() {
       ctx.textAlign = "center";
       ctx.fillText(`TICK ${formatPriceValue(tick, priceDecimals(tick))}`, plotR + AXIS_W / 2, HEADER_H / 2 + 1);
     },
-    [allCandles, tickSize, volumeProfile, session, ticker, mode, showProfile, showHeatmap, ind, decimals, liquidations, bigTrades, marketType, microEvents, showLiquidity, depthVersion, liquidity, marketSession, prior]
+    [allCandles, tickSize, volumeProfile, session, ticker, mode, showProfile, showHeatmap, ind, decimals, liquidations, bigTrades, marketType, microEvents, showLiquidity, depthVersion, liquidity, marketSession, prior, selectedVenues]
   );
 
   const { containerRef, canvasRef, redraw } = useCanvas(draw);
+
+  // Repaint once venue logos finish loading so badges switch from blank to logo.
+  useEffect(() => {
+    preloadVenueLogos(selectedVenues);
+    return onVenueLogosReady(redraw);
+  }, [selectedVenues, redraw]);
 
   // Wheel: scroll / zoom. Attached natively so preventDefault works.
   useEffect(() => {
@@ -778,13 +796,14 @@ export default function FootprintChart() {
     let hit: Bubble | null = null;
     for (const bubble of bubblesRef.current) {
       const d = Math.hypot(bubble.x - x, bubble.y - y);
-      if (d <= bubble.r + 2 && (!hit || bubble.r < hit.r)) hit = bubble;
+      const onBadge = bubble.badge && Math.hypot(bubble.badge.x - x, bubble.badge.y - y) <= bubble.badge.r;
+      if ((d <= bubble.r + 2 || onBadge) && (!hit || bubble.r < hit.r)) hit = bubble;
     }
     if (hit?.kind === "trade") {
       const { trade } = hit;
       setCrosshair(candle.openTime, trade.price);
       showTooltip(
-        `Big ${trade.side} · $${formatCompact(trade.quoteVolume, 2)}`,
+        `${VENUE_LABEL[trade.venue] ?? trade.venue} · Big ${trade.side} · $${formatCompact(trade.quoteVolume, 2)}`,
         [
           `Price: ${formatPriceValue(trade.price, decimals)}`,
           `Size: ${formatCompact(trade.quantity, 3)} (${trade.ratio.toFixed(1)}× average print)`,
@@ -801,7 +820,7 @@ export default function FootprintChart() {
       const { liq } = hit;
       setCrosshair(candle.openTime, liq.price);
       showTooltip(
-        `${liq.side === "long" ? "Long" : "Short"} liquidation · $${formatCompact(liq.quoteVolume, 2)}`,
+        `${VENUE_LABEL[liq.venue] ?? liq.venue} · ${liq.side === "long" ? "Long" : "Short"} liquidation · $${formatCompact(liq.quoteVolume, 2)}`,
         [
           `Price: ${formatPriceValue(liq.price, decimals)}`,
           `Size: ${formatCompact(liq.quantity, 3)}`,

@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useFitDensity } from "@/hooks/useFitDensity";
 import { useSessionStore } from "@/lib/session/SessionContext";
 import type { PanelVisibility, Timeframe, ToolProfile, Venue, VenueSelection } from "@/lib/types/market";
 import { FOREX_SYMBOLS } from "@/lib/config/venues";
 import { THEME_OPTIONS, type Theme } from "@/lib/theme";
 import { venueSupports } from "@/lib/adapters/capabilities";
-import { CRYPTO_ASSETS, CRYPTO_SYMBOLS } from "@/lib/config/instruments";
+import { ALL_ASSETS, METALS, venuesWithData } from "@/lib/config/instruments";
+import { FOREX_GROUPS } from "@/lib/config/venues";
 import { AssetLogo, VenueLogo } from "@/components/AssetLogo";
 import { Picker, type PickerOption } from "@/components/ui/Picker";
 import { useUIStore } from "@/lib/store/uiStore";
@@ -16,6 +18,9 @@ import { Menu, MenuCheckbox, MenuSection, Segmented, Select } from "@/components
 import AlertsMenu from "@/components/AlertsMenu";
 import RecordingsMenu from "@/components/RecordingsMenu";
 import ExportMenu from "@/components/ExportMenu";
+import LayoutMenu from "@/components/LayoutMenu";
+import { useLayoutStore } from "@/lib/store/layoutStore";
+import { isGridPanelId } from "@/lib/layout/gridPanels";
 
 const TIMEFRAMES: { value: Timeframe; label: string }[] = [
   { value: "1m", label: "1m" }, { value: "5m", label: "5m" }, { value: "15m", label: "15m" },
@@ -53,6 +58,8 @@ const PANEL_ITEMS: { key: keyof PanelVisibility; label: string; hint: string; gr
 ];
 
 export default function TopBar() {
+  // 0: full labels · 1: icon-only tools · 2: compact Contribute · 3: two rows.
+  const { ref: topbarRef } = useFitDensity<HTMLElement>(3);
   const symbol = useSessionStore((s) => s.symbol);
   const venue = useSessionStore((s) => s.venue);
   const marketType = useSessionStore((s) => s.marketType);
@@ -68,22 +75,52 @@ export default function TopBar() {
   const toolProfile = useUIStore((s) => s.toolProfile);
   const setToolProfile = useUIStore((s) => s.setToolProfile);
   const setPanelVisible = useUIStore((s) => s.setPanelVisible);
+  const layoutMode = useLayoutStore((s) => s.mode);
+  const gridLayout = useLayoutStore((s) => s.layout);
+  const addGridPanel = useLayoutStore((s) => s.addPanel);
+  const removeGridPanel = useLayoutStore((s) => s.removePanel);
   // During a replay the market is fixed by the recording.
   const replaying = useSessionStore((s) => s.replay !== null);
 
   const isForex = marketType === "forex";
+  // Metals picked from the FX list open their aggregated perpetual (real order flow).
+  const METAL_PREFIX = "metal:";
+  const coinOption = (asset: (typeof ALL_ASSETS)[number], kind: "perpetual" | "spot"): PickerOption<string> => {
+    const value = `${asset.base}USDT`;
+    const venues = venuesWithData(value, kind).length;
+    return {
+      value,
+      label: asset.kind === "metal" ? `${asset.base}/USDT` : value,
+      sub: asset.name,
+      // Common spellings: "BTCUSD", and for metals "XAUUSD" / "XAUSD".
+      keywords: `${asset.base} ${asset.name} ${asset.base}USD${asset.kind === "metal" ? ` ${asset.base}SD` : ""}`,
+      icon: <AssetLogo symbol={value} size={22} />,
+      group: asset.kind === "metal" ? "Metals" : "Crypto",
+      trailing: `${venues} venue${venues === 1 ? "" : "s"}`,
+    };
+  };
   const instrumentOptions: PickerOption<string>[] = isForex
-    ? FOREX_SYMBOLS.map((pair) => ({ value: pair, label: pair, sub: "Spot FX", icon: <AssetLogo symbol={pair} size={22} /> }))
-    : CRYPTO_ASSETS.map((asset) => {
-        const value = `${asset.base}USDT`;
-        return {
-          value,
-          label: value,
-          sub: asset.name,
-          keywords: asset.base,
-          icon: <AssetLogo symbol={value} size={22} />,
-        };
-      });
+    ? [
+        ...FOREX_SYMBOLS.map((pair) => ({
+          value: pair,
+          label: pair,
+          sub: FOREX_GROUPS[pair] === "Majors" ? "Major" : "Cross / exotic",
+          icon: <AssetLogo symbol={pair} size={22} />,
+          group: `FX ${FOREX_GROUPS[pair] === "Majors" ? "majors" : "crosses & exotics"}`,
+        })),
+        ...METALS.map((metal) => ({
+          value: `${METAL_PREFIX}${metal.base}USDT`,
+          label: `${metal.base}/USD`,
+          sub: `${metal.name} · perpetual order flow`,
+          keywords: `${metal.base} ${metal.name} ${metal.base}USD ${metal.base}USDT ${metal.base}SD`,
+          icon: <AssetLogo symbol={`${metal.base}USDT`} size={22} />,
+          group: "Metals",
+          trailing: `${metal.perp.length} venues`,
+        })),
+      ]
+    : ALL_ASSETS.filter((asset) => venuesWithData(`${asset.base}USDT`, marketType).length > 0).map((asset) =>
+        coinOption(asset, marketType === "spot" ? "spot" : "perpetual")
+      );
   const venueOptions = marketType === "perpetual" || marketType === "spot" ? VENUES[marketType] : [];
   const aggregateValue: VenueSelection = marketType === "perpetual" ? "all-perps" : "all-spot";
 
@@ -91,6 +128,15 @@ export default function TopBar() {
     venueOptions.filter((v) => venueSupports(v.value, sym, marketType)).map((v) => v.value);
 
   const chooseSymbol = (next: string) => {
+    if (next.startsWith(METAL_PREFIX)) {
+      // From FX: switch to the metal's aggregated perpetual across every venue that trades it.
+      const metal = next.slice(METAL_PREFIX.length);
+      setMarketType("perpetual");
+      setSymbol(metal);
+      setVenue("all-perps");
+      setSelectedVenues([...venuesWithData(metal, "perpetual")]);
+      return;
+    }
     setSymbol(next);
     if (isForex) return;
     if (venue === aggregateValue) setSelectedVenues(aggregateFor(next));
@@ -125,7 +171,7 @@ export default function TopBar() {
   };
 
   return (
-    <header className="topbar">
+    <header className="topbar" ref={topbarRef}>
       <Link className="brand" href="/" aria-label="orderflow home">
         <Wordmark size={28} />
       </Link>
@@ -138,7 +184,7 @@ export default function TopBar() {
             if (next === marketType) return;
             setMarketType(next);
             if (next === "forex") setSymbol("EUR/USD");
-            else if (isForex || !CRYPTO_SYMBOLS.includes(symbol)) setSymbol("BTCUSDT");
+            else if (isForex || venuesWithData(symbol, next).length === 0) setSymbol("BTCUSDT");
           }}
           options={[
             { value: "perpetual", label: "Perp", title: "Crypto perpetual futures" },
@@ -184,15 +230,22 @@ export default function TopBar() {
       </div>
 
       <div className="topbar-group">
-        <Segmented value={toolProfile} onChange={setToolProfile} options={PROFILES} ariaLabel="Workspace" />
+        {layoutMode === "classic" && <Segmented value={toolProfile} onChange={setToolProfile} options={PROFILES} ariaLabel="Workspace" />}
+        <LayoutMenu />
         <Menu hint="Panels" label={<><Icon.Layout /><span className="hide-compact">Panels</span></>}>
           {(["Chart", "Studies", "Sidebar"] as const).map((group) => (
             <MenuSection key={group} title={group}>
               {PANEL_ITEMS.filter((item) => item.group === group).map((item) => (
                 <MenuCheckbox
                   key={item.key}
-                  checked={panels[item.key]}
-                  onChange={(checked) => setPanelVisible(item.key, checked)}
+                  checked={layoutMode === "grid" && isGridPanelId(item.key) ? gridLayout.some((g) => g.i === item.key) : panels[item.key]}
+                  onChange={(checked) => {
+                    // In grid mode panels are placed on (or removed from) the grid.
+                    if (layoutMode === "grid" && isGridPanelId(item.key)) {
+                      if (checked) addGridPanel(item.key);
+                      else removeGridPanel(item.key);
+                    } else setPanelVisible(item.key, checked);
+                  }}
                   label={item.label}
                   hint={item.hint}
                 />
