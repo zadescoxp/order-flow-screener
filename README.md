@@ -486,6 +486,54 @@ Run the linter:
 npm run lint
 ```
 
+## Docker
+
+The `Dockerfile` builds a production image and runs `next start` as the
+unprivileged `node` user on port 3000. Application config is unchanged.
+
+`NEXT_PUBLIC_FINNHUB_API_KEY` and `NEXT_PUBLIC_SITE_URL` are inlined when the
+image is built. Changing them later requires a new build. Restarting the
+container does not change them. Leave the Finnhub key empty to run crypto
+mode only. Set `NEXT_PUBLIC_SITE_URL` to the public origin you will open in
+the browser, including the port if it is not 80 or 443. That value is used
+for canonical links and share-image URLs.
+
+The image does not read `.env.local`. Those files stay out of the build
+context. Pass the values as build arguments. Do not push an image that
+contains a real Finnhub key to a public registry. The key is part of the
+client bundle, the same as in a normal production build.
+
+Build and run with the values from `.env.local`:
+
+```bash
+set -a
+. ./.env.local
+set +a
+
+docker build \
+  --build-arg NEXT_PUBLIC_FINNHUB_API_KEY \
+  --build-arg NEXT_PUBLIC_SITE_URL \
+  -t order-flow-tracker .
+
+docker run --rm -p 3000:3000 order-flow-tracker
+```
+
+`--build-arg NAME` with no `=` uses the variable already exported in the
+shell. A build with neither variable set still succeeds. Forex stays
+disabled, and the site URL defaults to `http://localhost:3000`.
+
+Open [http://localhost:3000](http://localhost:3000).
+
+To publish the container on another port, set `PORT` and map that same port:
+
+```bash
+docker run --rm -p 8080:8080 -e PORT=8080 order-flow-tracker
+```
+
+The base image is `node:22-alpine`, which satisfies the Node.js 20 or newer
+requirement. Docker BuildKit is required because the build caches npm and
+Next.js build files across runs. Docker Desktop enables BuildKit by default.
+
 ## Using the terminal
 
 1. Choose Crypto or Forex in the Market selector.
@@ -589,6 +637,9 @@ lib/export/
 
 docs/
   forex_setup.md            Forex connection and symbol details
+
+Dockerfile                   Production image
+.dockerignore                Files excluded from the image build
 ```
 
 ## Design and implementation notes
