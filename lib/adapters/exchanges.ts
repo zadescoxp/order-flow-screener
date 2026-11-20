@@ -10,8 +10,9 @@ import { BybitFuturesAdapter, BybitSpotAdapter } from "./bybit";
 import { OKXFuturesAdapter, OKXSpotAdapter } from "./okx";
 import { BitgetFuturesAdapter, BitgetSpotAdapter } from "./bitget";
 import { HyperliquidAdapter } from "./hyperliquid";
+import { CoinbaseSpotAdapter } from "./coinbase";
 
-export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter };
+export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter, CoinbaseSpotAdapter };
 
 type DeribitLevel = [number, number] | [string, number, number];
 
@@ -62,79 +63,6 @@ export class BinanceSpotAdapter extends BaseExchangeAdapter {
   }
 
   protected sendPing(): void { if (Date.now() - this.lastHeartbeat > this.staleThresholdMs) this.setStatus("stale"); }
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
-  private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }
-}
-
-// ============================================================
-// COINBASE SPOT ADAPTER
-// ============================================================
-export class CoinbaseSpotAdapter extends BaseExchangeAdapter {
-  readonly venue: Venue = "coinbase-spot";
-  private readonly BASE_WS = "wss://advanced-trade-ws.coinbase.com";
-
-  constructor(symbol: string) {
-    // BTCUSDT → BTC-USD
-    let s = symbol.toUpperCase();
-    if (!s.includes("-")) {
-      const base = s.replace("USDT", "").replace("USD", "");
-      s = `${base}-USD`;
-    }
-    super(s);
-  }
-
-  protected buildWsUrl(): string { return this.BASE_WS; }
-
-  connect(): void {
-    this.setStatus("connecting");
-    this.ws = new WebSocket(this.buildWsUrl()) as unknown as WebSocket;
-    this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
-      this.lastHeartbeat = Date.now();
-      this.setStatus("live");
-      // Coinbase Advanced Trade API uses channel-based subscription
-      this.ws!.send(JSON.stringify({ type: "subscribe", product_ids: [this.symbol], channel: "market_trades" }));
-      this.ws!.send(JSON.stringify({ type: "subscribe", product_ids: [this.symbol], channel: "level2" }));
-      this.startPing(30_000);
-    };
-    this.ws.onmessage = (e: MessageEvent) => {
-      this.lastHeartbeat = Date.now();
-      // Any message after a transient error means the feed has recovered.
-      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
-      try { this.handleMessage(JSON.parse(e.data as string)); } catch { /**/ }
-    };
-    this.ws.onerror = () => this.setStatus("error");
-    this.ws.onclose = () => { this.stopPing(); if (this.status !== "offline") { this.setStatus("connecting"); this.reconnect(); } };
-  }
-
-  disconnect(): void { this.setStatus("offline"); this.stopPing(); this.ws?.close(); this.ws = null; }
-
-  protected handleMessage(raw: unknown): void {
-    const msg = raw as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const channel = msg.channel as string;
-
-    if (channel === "market_trades") {
-      for (const t of (msg.events ?? []) as Array<{ trades: Array<{ trade_id: string; product_id: string; price: string; size: string; side: string; time: string }> }>) {
-        for (const tr of t.trades ?? []) {
-          const price = parseFloat(tr.price), qty = parseFloat(tr.size);
-          this.emitTrade({ id: `cb-${tr.trade_id}`, venue: this.venue, symbol: tr.product_id, timestamp: new Date(tr.time).getTime(), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: tr.side === "BUY" ? "buy" : "sell", marketType: "spot" });
-        }
-      }
-    } else if (channel === "l2_data") {
-      for (const event of (msg.events ?? []) as Array<{ type: string; updates: Array<{ side: string; price_level: string; new_quantity: string }> }>) {
-        if (event.type === "snapshot") { this.bids.clear(); this.asks.clear(); }
-        for (const u of event.updates ?? []) {
-          const price = parseFloat(u.price_level), qty = parseFloat(u.new_quantity);
-          if (u.side === "bid") { if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
-          else { if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
-        }
-        emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
-      }
-    }
-  }
-
-  protected sendPing(): void { /* Coinbase pings via heartbeat subscription */ }
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
   private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }
