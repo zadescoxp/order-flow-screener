@@ -5,11 +5,12 @@
 import { BaseExchangeAdapter, num } from "./base";
 import type { Venue, LiquidationSide } from "@/lib/types/market";
 import { FinnhubForexAdapter } from "./forex";
-import { BOOK_DEPTH, applyLevels, emitBook, parseBitgetTrades } from "./book";
+import { BOOK_DEPTH, emitBook } from "./book";
 import { BybitFuturesAdapter, BybitSpotAdapter } from "./bybit";
 import { OKXFuturesAdapter, OKXSpotAdapter } from "./okx";
+import { BitgetFuturesAdapter, BitgetSpotAdapter } from "./bitget";
 
-export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter };
+export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter };
 
 type DeribitLevel = [number, number] | [string, number, number];
 
@@ -135,148 +136,6 @@ export class HyperliquidAdapter extends BaseExchangeAdapter {
   }
 
   protected sendPing(): void { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ method: "ping" })); }
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
-  private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }
-}
-
-// ============================================================
-// BITGET FUTURES ADAPTER (mix-contracts)
-// ============================================================
-export class BitgetFuturesAdapter extends BaseExchangeAdapter {
-  readonly venue: Venue = "bitget-futures";
-  private readonly BASE_WS = "wss://ws.bitget.com/v2/ws/public";
-
-  constructor(symbol: string) {
-    let s = symbol.toUpperCase();
-    if (s.includes("_UMCBL")) s = s.replace("_UMCBL", "");
-    super(s);
-  }
-
-  protected buildWsUrl(): string { return this.BASE_WS; }
-
-  connect(): void {
-    this.setStatus("connecting");
-    this.ws = new WebSocket(this.buildWsUrl()) as unknown as WebSocket;
-    this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
-      this.lastHeartbeat = Date.now();
-      this.setStatus("live");
-      const instType = "USDT-FUTURES";
-      const instId = this.symbol;
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ instType, channel: "trade", instId }, { instType, channel: "books", instId }, { instType, channel: "ticker", instId }] }));
-      this.startPing(25_000);
-    };
-    this.ws.onmessage = (e: MessageEvent) => {
-      this.lastHeartbeat = Date.now();
-      // Any message after a transient error means the feed has recovered.
-      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
-      try {
-        const raw = e.data as string;
-        if (raw === "pong") return;
-        const m = JSON.parse(raw);
-        if (m.data) this.handleMessage(m);
-      } catch { /**/ }
-    };
-    this.ws.onerror = () => this.setStatus("error");
-    this.ws.onclose = () => { this.stopPing(); if (this.status !== "offline") { this.setStatus("connecting"); this.reconnect(); } };
-  }
-
-  disconnect(): void { this.setStatus("offline"); this.stopPing(); this.ws?.close(); this.ws = null; }
-
-  protected handleMessage(raw: unknown): void {
-    const msg = raw as { arg: { channel: string }; action?: string; data: unknown[] };
-    if (msg.arg.channel === "trade") {
-      // The first push is a snapshot of recent trades; skip it so old prints don't back-date the footprint.
-      if (msg.action === "snapshot") return;
-      for (const t of parseBitgetTrades(msg.data)) {
-        const price = parseFloat(t.price), qty = parseFloat(t.size);
-        this.emitTrade({ id: `bg-${t.tradeId}`, venue: this.venue, symbol: this.symbol, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side === "buy" ? "buy" : "sell", marketType: "perpetual" });
-      }
-    } else if (msg.arg.channel === "ticker") {
-      // holdingAmount is open interest in base units. Bitget has no public liquidation stream.
-      for (const t of msg.data as Array<Record<string, string | undefined>>) {
-        this.emitDerivatives({
-          openInterest: num(t.holdingAmount),
-          fundingRate: num(t.fundingRate),
-          nextFundingTime: num(t.nextFundingTime),
-          markPrice: num(t.markPrice),
-          indexPrice: num(t.indexPrice),
-          timestamp: num(t.ts),
-        });
-      }
-    } else if (msg.arg.channel === "books") {
-      if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
-      for (const d of msg.data as Array<{ bids: [string, string][]; asks: [string, string][] }>) {
-        for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
-        for (const [p, q] of d.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
-      }
-      emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
-    }
-  }
-
-  protected sendPing(): void { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send("ping"); }
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
-  private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }
-}
-
-// ============================================================
-// BITGET SPOT ADAPTER
-// ============================================================
-export class BitgetSpotAdapter extends BaseExchangeAdapter {
-  readonly venue: Venue = "bitget-spot";
-  private readonly BASE_WS = "wss://ws.bitget.com/v2/ws/public";
-
-  constructor(symbol: string) { super(symbol.toUpperCase()); }
-  protected buildWsUrl(): string { return this.BASE_WS; }
-
-  connect(): void {
-    this.setStatus("connecting");
-    this.ws = new WebSocket(this.buildWsUrl()) as unknown as WebSocket;
-    this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
-      this.lastHeartbeat = Date.now();
-      this.setStatus("live");
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [{ instType: "SPOT", channel: "trade", instId: this.symbol }, { instType: "SPOT", channel: "books", instId: this.symbol }] }));
-      this.startPing(25_000);
-    };
-    this.ws.onmessage = (e: MessageEvent) => {
-      this.lastHeartbeat = Date.now();
-      // Any message after a transient error means the feed has recovered.
-      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
-      try {
-        const raw = e.data as string;
-        if (raw === "pong") return;
-        const m = JSON.parse(raw);
-        if (m.data) this.handleMessage(m);
-      } catch { /**/ }
-    };
-    this.ws.onerror = () => this.setStatus("error");
-    this.ws.onclose = () => { this.stopPing(); if (this.status !== "offline") { this.setStatus("connecting"); this.reconnect(); } };
-  }
-
-  disconnect(): void { this.setStatus("offline"); this.stopPing(); this.ws?.close(); this.ws = null; }
-
-  protected handleMessage(raw: unknown): void {
-    const msg = raw as { arg: { channel: string }; action?: string; data: unknown[] };
-    if (msg.arg.channel === "trade") {
-      if (msg.action === "snapshot") return;
-      for (const t of parseBitgetTrades(msg.data)) {
-        const price = parseFloat(t.price), qty = parseFloat(t.size);
-        this.emitTrade({ id: `bgs-${t.tradeId}`, venue: this.venue, symbol: this.symbol, timestamp: parseInt(t.ts), localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side === "buy" ? "buy" : "sell", marketType: "spot" });
-      }
-    } else if (msg.arg.channel === "books") {
-      if (msg.action === "snapshot") { this.bids.clear(); this.asks.clear(); }
-      for (const d of msg.data as Array<{ bids: [string, string][]; asks: [string, string][] }>) {
-        for (const [p, q] of d.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
-        for (const [p, q] of d.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
-      }
-      emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
-    }
-  }
-
-  protected sendPing(): void { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send("ping"); }
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
   private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }
