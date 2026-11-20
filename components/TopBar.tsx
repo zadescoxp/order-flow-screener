@@ -37,11 +37,13 @@ const VENUES: Record<"perpetual" | "spot", { value: Venue; label: string }[]> = 
     { value: "okx-futures", label: "OKX" }, { value: "hyperliquid", label: "Hyperliquid" },
     { value: "bitget-futures", label: "Bitget" }, { value: "deribit", label: "Deribit" },
     { value: "gate-futures", label: "Gate" },
+    { value: "kucoin-futures", label: "KuCoin" },
   ],
   spot: [
     { value: "binance-spot", label: "Binance" }, { value: "coinbase-spot", label: "Coinbase" },
     { value: "okx-spot", label: "OKX" }, { value: "bybit-spot", label: "Bybit" }, { value: "bitget-spot", label: "Bitget" },
     { value: "gate-spot", label: "Gate" },
+    { value: "kucoin-spot", label: "KuCoin" },
   ],
 };
 const PANEL_ITEMS: { key: keyof PanelVisibility; label: string; hint: string; group: "Chart" | "Studies" | "Sidebar" }[] = [

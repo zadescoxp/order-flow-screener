@@ -13,8 +13,9 @@ import { HyperliquidAdapter } from "./hyperliquid";
 import { CoinbaseSpotAdapter } from "./coinbase";
 import { BinanceFuturesAdapter, BinanceSpotAdapter } from "./binance";
 import { GateFuturesAdapter, GateSpotAdapter } from "./gate";
+import { KucoinFuturesAdapter, KucoinSpotAdapter } from "./kucoin";
 
-export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter, CoinbaseSpotAdapter, BinanceFuturesAdapter, BinanceSpotAdapter, GateFuturesAdapter, GateSpotAdapter };
+export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter, CoinbaseSpotAdapter, BinanceFuturesAdapter, BinanceSpotAdapter, GateFuturesAdapter, GateSpotAdapter, KucoinFuturesAdapter, KucoinSpotAdapter };
 
 type DeribitLevel = [number, number] | [string, number, number];
 
@@ -139,6 +140,8 @@ export function createAdapter(venue: Venue, symbol: string): BaseExchangeAdapter
     case "coinbase-spot":   return new CoinbaseSpotAdapter(symbol);
     case "gate-futures": return new GateFuturesAdapter(symbol);
     case "gate-spot": return new GateSpotAdapter(symbol);
+    case "kucoin-futures": return new KucoinFuturesAdapter(symbol);
+    case "kucoin-spot": return new KucoinSpotAdapter(symbol);
     case "deribit":         return new DeribitAdapter(symbol);
     default:                return null;
   }

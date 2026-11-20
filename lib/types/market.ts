@@ -16,6 +16,8 @@ export type Venue =
   | "coinbase-spot"
   | "gate-futures"
   | "gate-spot"
+  | "kucoin-futures"
+  | "kucoin-spot"
   | "finnhub-forex";
 export type VenueSelection = Venue | "all-perps" | "all-spot";
 

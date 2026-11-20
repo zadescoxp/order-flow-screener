@@ -94,6 +94,8 @@ export const VENUE_LOGOS: Partial<Record<string, string>> = {
   "coinbase-spot": "/venues/coinbase.svg",
   "gate-futures": "/venues/gate.svg",
   "gate-spot": "/venues/gate.svg",
+  "kucoin-futures": "/venues/kucoin.svg",
+  "kucoin-spot": "/venues/kucoin.svg",
   hyperliquid: "/venues/hyperliquid.svg",
   deribit: "/venues/deribit.svg",
 };

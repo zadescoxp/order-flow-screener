@@ -93,6 +93,8 @@ export const VENUE_SHORT: Record<string, string> = {
   "coinbase-spot": "CB",
   "gate-futures": "GATE",
   "gate-spot": "GATE",
+  "kucoin-futures": "KUC",
+  "kucoin-spot": "KUC",
   "finnhub-forex": "FX",
 };
 
@@ -110,6 +112,8 @@ export const VENUE_LABEL: Record<string, string> = {
   "coinbase-spot": "Coinbase",
   "gate-futures": "Gate Perp",
   "gate-spot": "Gate Spot",
+  "kucoin-futures": "KuCoin Perp",
+  "kucoin-spot": "KuCoin Spot",
   "finnhub-forex": "FX Feed",
   "all-perps": "All Perps",
   "all-spot": "All Spot",

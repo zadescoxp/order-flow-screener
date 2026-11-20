@@ -3,8 +3,8 @@ import { FOREX_SYMBOLS, isForexVenue } from "@/lib/config/venues";
 import { venuesWithData } from "@/lib/config/instruments";
 
 const FOREX_VENUES: Venue[] = ["finnhub-forex"];
-const PERP_VENUES: Venue[] = ["binance-futures", "bybit-futures", "okx-futures", "hyperliquid", "bitget-futures", "deribit", "gate-futures"];
-const SPOT_VENUES: Venue[] = ["binance-spot", "coinbase-spot", "okx-spot", "bybit-spot", "bitget-spot", "gate-spot"];
+const PERP_VENUES: Venue[] = ["binance-futures", "bybit-futures", "okx-futures", "hyperliquid", "bitget-futures", "deribit", "gate-futures", "kucoin-futures"];
+const SPOT_VENUES: Venue[] = ["binance-spot", "coinbase-spot", "okx-spot", "bybit-spot", "bitget-spot", "gate-spot", "kucoin-spot"];
 
 /**
  * True when `venue` has a live market for `symbol`. Crypto and metals come
