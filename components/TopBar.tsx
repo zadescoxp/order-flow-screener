@@ -38,12 +38,14 @@ const VENUES: Record<"perpetual" | "spot", { value: Venue; label: string }[]> = 
     { value: "bitget-futures", label: "Bitget" }, { value: "deribit", label: "Deribit" },
     { value: "gate-futures", label: "Gate" },
     { value: "kucoin-futures", label: "KuCoin" },
+    { value: "kraken-futures", label: "Kraken" },
   ],
   spot: [
     { value: "binance-spot", label: "Binance" }, { value: "coinbase-spot", label: "Coinbase" },
     { value: "okx-spot", label: "OKX" }, { value: "bybit-spot", label: "Bybit" }, { value: "bitget-spot", label: "Bitget" },
     { value: "gate-spot", label: "Gate" },
     { value: "kucoin-spot", label: "KuCoin" },
+    { value: "kraken-spot", label: "Kraken" },
   ],
 };
 const PANEL_ITEMS: { key: keyof PanelVisibility; label: string; hint: string; group: "Chart" | "Studies" | "Sidebar" }[] = [

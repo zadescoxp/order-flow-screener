@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@siebly/hyperliquid-api": "1.0.3",
+    "@siebly/kraken-api": "1.1.10",
     "@types/ws": "^8.18.2",
     "binance": "3.6.12",
     "bitget-api": "3.2.8",

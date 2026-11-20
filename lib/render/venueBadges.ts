@@ -25,6 +25,7 @@ const STYLES: Record<string, BadgeStyle> = {
   deribit: { tile: "#1C55F5", ink: "#FFFFFF", glyph: "/venues/mono/deribit.png" },
   gate: { tile: "#2354E6", ink: "#FFFFFF", glyph: "/venues/mono/gate.svg" },
   kucoin: { tile: "#23AF91", ink: "#FFFFFF", glyph: "/venues/mono/kucoin.svg" },
+  kraken: { tile: "#5741D9", ink: "#FFFFFF", glyph: "/venues/mono/kraken.svg" },
   hyperliquid: { tile: "#97FCE4", ink: "#062A24", glyph: "/venues/mono/hyperliquid.svg" },
 };
 
