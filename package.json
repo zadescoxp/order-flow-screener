@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@types/ws": "^8.18.2",
+    "bybit-api": "4.8.5",
     "lucide-react": "1.59.0",
     "next": "16.4.0",
     "react": "19.3.0",
