@@ -23,13 +23,6 @@ export function AssetLogo({ symbol, size = 20 }: { symbol: string; size?: number
 
 export function VenueLogo({ venue, size = 16 }: { venue: string; size?: number }) {
   const src = VENUE_LOGOS[venue];
-  if (venue === "hyperliquid") {
-    return (
-      <span className="asset-logo asset-monogram venue-monogram" style={{ width: size, height: size, fontSize: size * 0.5, background: "#97FCE4", color: "#062a24" }} aria-hidden>
-        H
-      </span>
-    );
-  }
   if (!src) {
     return (
       <span className="asset-logo asset-monogram venue-monogram" style={{ width: size, height: size, fontSize: size * 0.5 }} aria-hidden>

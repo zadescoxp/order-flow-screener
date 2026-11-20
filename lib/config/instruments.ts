@@ -92,4 +92,6 @@ export const VENUE_LOGOS: Partial<Record<string, string>> = {
   "bitget-futures": "/venues/bitget.svg",
   "bitget-spot": "/venues/bitget.svg",
   "coinbase-spot": "/venues/coinbase.svg",
+  hyperliquid: "/venues/hyperliquid.svg",
+  deribit: "/venues/deribit.svg",
 };

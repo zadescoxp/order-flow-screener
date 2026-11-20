@@ -283,8 +283,9 @@ button, select, input { font: inherit; color: inherit; }
 /* ─── Logos & picker ─── */
 .asset-logo { display: inline-block; flex: none; border-radius: 50%; object-fit: contain; }
 .asset-monogram { display: inline-grid; place-items: center; color: #fff; font-family: var(--font-ui); font-weight: 700; letter-spacing: -0.02em; line-height: 1; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
-.venue-monogram { border-radius: 6px; background: var(--bg-active); color: var(--text-primary); }
-.venue-logo { box-sizing: border-box; padding: 3px; border-radius: 6px; background: #ffffff; }
+.venue-monogram { border-radius: 28%; background: var(--bg-active); color: var(--text-primary); }
+/* Venue logos are brand tiles (mark on the exchange's own colour); a faint ring keeps dark tiles visible on dark panels. */
+.venue-logo { border-radius: 28%; object-fit: cover; box-shadow: 0 0 0 1px var(--border); }
 
 .picker { position: relative; }
 .picker-button { gap: 8px; padding: 0 10px 0 6px; color: var(--text-primary); }
