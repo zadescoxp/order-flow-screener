@@ -23,7 +23,11 @@ const STYLES: Record<string, BadgeStyle> = {
   bitget: { tile: "#00D7E4", ink: "#05161B", glyph: "/venues/mono/bitget.svg" },
   coinbase: { tile: "#0052FF", ink: "#FFFFFF", glyph: "/venues/mono/coinbase.svg" },
   deribit: { tile: "#1C55F5", ink: "#FFFFFF", glyph: "/venues/mono/deribit.png" },
-  hyperliquid: { tile: "#97FCE4", ink: "#062A24", letter: "H" },
+  gate: { tile: "#2354E6", ink: "#FFFFFF", glyph: "/venues/mono/gate.svg" },
+  kucoin: { tile: "#23AF91", ink: "#FFFFFF", glyph: "/venues/mono/kucoin.svg" },
+  kraken: { tile: "#5741D9", ink: "#FFFFFF", glyph: "/venues/mono/kraken.svg" },
+  htx: { tile: "#1B5EF0", ink: "#FFFFFF", glyph: "/venues/mono/htx.svg" },
+  hyperliquid: { tile: "#97FCE4", ink: "#062A24", glyph: "/venues/mono/hyperliquid.svg" },
 };
 
 /** "binance-futures" → "binance"; venues without a suffix map to themselves. */

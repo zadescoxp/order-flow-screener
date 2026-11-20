@@ -14,6 +14,14 @@ export type Venue =
   | "hyperliquid"
   | "deribit"
   | "coinbase-spot"
+  | "gate-futures"
+  | "gate-spot"
+  | "kucoin-futures"
+  | "kucoin-spot"
+  | "kraken-futures"
+  | "kraken-spot"
+  | "htx-futures"
+  | "htx-spot"
   | "finnhub-forex";
 export type VenueSelection = Venue | "all-perps" | "all-spot";
 
