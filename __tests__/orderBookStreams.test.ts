@@ -39,6 +39,22 @@ describe("OKX books channel", () => {
     expect(last.asks).toEqual([expect.objectContaining({ price: 101, size: 3 })]);
     expect(statuses.some((s) => s.status === "error")).toBe(false);
   });
+
+  it("drops the book and waits for a new snapshot when the seqId chain breaks", () => {
+    const adapter = new OKXSpotAdapter("BTCUSDT");
+    const { books, statuses } = capture(adapter);
+    const row = (bid: string, seqId: number, prevSeqId: number) => ({ bids: [[bid, "1", "0", "1"]], asks: [["101", "1", "0", "1"]], ts: "1", seqId, prevSeqId });
+    feed(adapter, { arg: { channel: "books" }, action: "update", data: [row("98", 9, 8)] }); // before any snapshot: ignored
+    expect(books).toHaveLength(0);
+    feed(adapter, { arg: { channel: "books" }, action: "snapshot", data: [row("100", 10, -1)] });
+    feed(adapter, { arg: { channel: "books" }, action: "update", data: [row("99", 11, 10)] });
+    expect(books).toHaveLength(2);
+    feed(adapter, { arg: { channel: "books" }, action: "update", data: [row("97", 14, 13)] }); // 11 → 13: gap
+    expect(statuses.at(-1)?.status).toBe("stale");
+    expect(adapter.depthSides()).toBeNull();
+    feed(adapter, { arg: { channel: "books" }, action: "update", data: [row("96", 15, 14)] });
+    expect(books).toHaveLength(2);
+  });
 });
 
 describe("Deribit book channel", () => {
