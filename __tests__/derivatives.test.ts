@@ -16,7 +16,7 @@ import {
   HyperliquidAdapter,
   OKXFuturesAdapter,
 } from "@/lib/adapters/exchanges";
-import { BinanceFuturesAdapter } from "@/lib/adapters/binanceFutures";
+import { BinanceFuturesAdapter } from "@/lib/adapters/binance";
 import type { BaseExchangeAdapter } from "@/lib/adapters/base";
 import type { DerivativesSnapshot, NormalizedLiquidation, OpenInterestPoint } from "@/lib/types/market";
 

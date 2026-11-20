@@ -1,32 +1,80 @@
 // ============================================================
-// BINANCE FUTURES ADAPTER
-// Connects to Binance USD-M Futures WebSocket streams
-// Provides: normalized trades, order book depth, liquidations,
-// funding / mark / index (markPrice stream) and open interest (REST poll).
+// BINANCE ADAPTERS (Siebly `binance`)
 //
-// Binance routes USD-M market streams by category: aggTrade, markPrice
-// and forceOrder are served from /market, partial depth from /public.
-// The legacy /ws route accepts subscriptions but delivers no data.
+// USD-M futures: aggTrade, markPrice@1s and forceOrder live on Binance's
+// /market route and partial depth on /public; the SDK's "usdm" key routes
+// each topic to the right one. Open interest, the deep book snapshot for the
+// heatmap and the funding interval come from REST.
 // ============================================================
 
-import { BaseExchangeAdapter, num } from "./base";
-import type {
-  NormalizedOrderBook,
-  OrderBookLevel,
-  Venue,
-} from "@/lib/types/market";
+import type { WebsocketClient } from "binance";
+import { num } from "./base";
+import { emitBook } from "./book";
+import { quietLogger, SieblyAdapter, type AckResult, type SieblyEventNames } from "./siebly";
+import type { Venue } from "@/lib/types/market";
 
-const MARKET_WS = "wss://fstream.binance.com/market/ws";
-const PUBLIC_WS = "wss://fstream.binance.com/public/ws";
 const REST = "https://fapi.binance.com";
 const OI_POLL_MS = 5_000;
 const DEEP_BOOK_POLL_MS = 5_000;
 
-export class BinanceFuturesAdapter extends BaseExchangeAdapter {
+/* eslint-disable @typescript-eslint/no-explicit-any -- Binance payloads are flat, loosely typed objects */
+type BinanceMessage = Record<string, any>;
+
+abstract class BinanceAdapter extends SieblyAdapter<WebsocketClient, string> {
+  protected abstract readonly wsKey: "main" | "usdm";
+  protected abstract readonly depthTopic: string;
+  /** binance emits raw stream data as "message" ("formattedMessage" when beautify is on). */
+  protected readonly events: SieblyEventNames = { data: "message", reconnecting: "reconnecting" };
+
+  constructor(symbol: string) { super(symbol.toUpperCase()); }
+
+  protected async createClient(): Promise<WebsocketClient> {
+    const { WebsocketClient } = await import("binance");
+    return new WebsocketClient({ beautify: false, pingInterval: 10_000, pongTimeout: 5_000, reconnectTimeout: 1_000 }, quietLogger("binance"));
+  }
+
+  protected bookTopics(): string[] { return [this.depthTopic]; }
+  protected subscribeTopics(client: WebsocketClient, topics: string[]) { return client.subscribe(topics, this.wsKey); }
+  protected unsubscribeTopics(client: WebsocketClient, topics: string[]) { return client.unsubscribe(topics, this.wsKey); }
+
+  /** Binance answers SUBSCRIBE with { result: null, id }; errors arrive as exceptions. */
+  protected ackOf(response: unknown): AckResult {
+    const res = response as { result?: unknown; id?: unknown };
+    return "result" in (res ?? {}) && res.result === null && res.id !== undefined ? { ok: true } : null;
+  }
+
+  /** Partial depth: every message is a full top-N snapshot. */
+  protected applyDepth(msg: BinanceMessage): void {
+    this.bids.clear();
+    this.asks.clear();
+    for (const [p, q] of (msg.b ?? msg.bids) as [string, string][]) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
+    for (const [p, q] of (msg.a ?? msg.asks) as [string, string][]) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(price, qty); }
+    emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
+  }
+}
+
+export class BinanceSpotAdapter extends BinanceAdapter {
+  readonly venue: Venue = "binance-spot";
+  protected readonly wsKey = "main";
+  protected get depthTopic(): string { return `${this.symbol.toLowerCase()}@depth20@100ms`; }
+
+  protected topics(): string[] { return [`${this.symbol.toLowerCase()}@trade`, this.depthTopic]; }
+
+  protected handleMessage(raw: unknown): void {
+    const msg = raw as BinanceMessage;
+    if (msg.e === "trade") {
+      const price = parseFloat(msg.p), qty = parseFloat(msg.q);
+      this.emitTrade({ id: `bs-${msg.t}`, venue: this.venue, symbol: msg.s, timestamp: msg.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: msg.m ? "sell" : "buy", marketType: "spot", sequence: msg.t });
+    } else if (msg.lastUpdateId && msg.bids && msg.asks) {
+      this.applyDepth(msg);
+    }
+  }
+}
+
+export class BinanceFuturesAdapter extends BinanceAdapter {
   readonly venue: Venue = "binance-futures";
-  private depthWs: WebSocket | null = null;
-  private depthRetry: ReturnType<typeof setTimeout> | null = null;
-  private depthAttempts = 0;
+  protected readonly wsKey = "usdm";
+  protected get depthTopic(): string { return `${this.symbol.toLowerCase()}@depth20@100ms`; }
   private oiTimer: ReturnType<typeof setInterval> | null = null;
   private deepTimer: ReturnType<typeof setInterval> | null = null;
   private deepBids = new Map<number, number>();
@@ -34,13 +82,14 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
   private fundingIntervalHours: number | undefined;
   private active = false;
 
-  constructor(symbol: string) { super(symbol.toUpperCase()); }
-  protected buildWsUrl(): string { return MARKET_WS; }
+  protected topics(): string[] {
+    const s = this.symbol.toLowerCase();
+    return [`${s}@aggTrade`, `${s}@markPrice@1s`, `${s}@forceOrder`, this.depthTopic];
+  }
 
   connect(): void {
     this.active = true;
     super.connect();
-    this.connectDepth();
     this.startOpenInterestPolling();
     this.startDeepBookPolling();
     void this.loadFundingInterval();
@@ -48,45 +97,11 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
 
   disconnect(): void {
     this.active = false;
-    if (this.depthRetry) clearTimeout(this.depthRetry);
-    this.depthRetry = null;
     if (this.oiTimer) clearInterval(this.oiTimer);
     this.oiTimer = null;
     if (this.deepTimer) clearInterval(this.deepTimer);
     this.deepTimer = null;
-    const depth = this.depthWs;
-    this.depthWs = null;
-    depth?.close();
     super.disconnect();
-  }
-
-  protected subscribe(): void {
-    const s = this.symbol.toLowerCase();
-    this.ws?.send(JSON.stringify({
-      method: "SUBSCRIBE",
-      params: [`${s}@aggTrade`, `${s}@markPrice@1s`, `${s}@forceOrder`],
-      id: 1,
-    }));
-  }
-
-  /** Depth lives on a separate route; it reconnects independently of the main socket. */
-  private connectDepth(): void {
-    if (!this.active || typeof WebSocket === "undefined") return;
-    const ws = new WebSocket(PUBLIC_WS) as unknown as WebSocket;
-    this.depthWs = ws;
-    ws.onopen = () => {
-      this.depthAttempts = 0;
-      ws.send(JSON.stringify({ method: "SUBSCRIBE", params: [`${this.symbol.toLowerCase()}@depth20@100ms`], id: 2 }));
-    };
-    ws.onmessage = (event: MessageEvent) => {
-      try { this.handleMessage(JSON.parse(event.data as string)); } catch { /* ignore malformed frames */ }
-    };
-    ws.onclose = () => {
-      if (this.depthWs !== ws || !this.active) return;
-      this.depthWs = null;
-      const delay = Math.min(1000 * 2 ** this.depthAttempts++, 30_000);
-      this.depthRetry = setTimeout(() => { this.depthRetry = null; this.connectDepth(); }, delay);
-    };
   }
 
   private startOpenInterestPolling(): void {
@@ -95,7 +110,7 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
       try {
         const response = await fetch(`${REST}/fapi/v1/openInterest?symbol=${encodeURIComponent(this.symbol)}`);
         if (!response.ok) return;
-        const body = await response.json() as { openInterest?: string; time?: number };
+        const body = (await response.json()) as { openInterest?: string; time?: number };
         if (this.active) this.emitDerivatives({ openInterest: num(body.openInterest), timestamp: body.time });
       } catch { /* transient network failure — next poll retries */ }
     };
@@ -110,7 +125,7 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
       try {
         const response = await fetch(`${REST}/fapi/v1/depth?symbol=${encodeURIComponent(this.symbol)}&limit=1000`);
         if (!response.ok) return;
-        const body = await response.json() as { bids?: [string, string][]; asks?: [string, string][] };
+        const body = (await response.json()) as { bids?: [string, string][]; asks?: [string, string][] };
         const toMap = (levels: [string, string][] = []) => new Map(levels.map(([p, q]) => [Number(p), Number(q)] as [number, number]).filter(([p, q]) => p > 0 && q > 0));
         if (!this.active) return;
         this.deepBids = toMap(body.bids);
@@ -143,7 +158,7 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
     try {
       const response = await fetch(`${REST}/fapi/v1/fundingInfo`);
       if (!response.ok) return;
-      const list = await response.json() as Array<{ symbol: string; fundingIntervalHours?: number }>;
+      const list = (await response.json()) as Array<{ symbol: string; fundingIntervalHours?: number }>;
       this.fundingIntervalHours = list.find((item) => item.symbol === this.symbol)?.fundingIntervalHours ?? 8;
     } catch {
       this.fundingIntervalHours = 8;
@@ -151,16 +166,12 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
   }
 
   protected handleMessage(raw: unknown): void {
-    const msg = raw as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const msg = raw as BinanceMessage;
     if (msg.e === "aggTrade") {
       const price = parseFloat(msg.p), qty = parseFloat(msg.q);
       this.emitTrade({ id: `bf-${msg.a}`, venue: this.venue, symbol: msg.s, timestamp: msg.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: msg.m ? "sell" : "buy", marketType: "perpetual", sequence: msg.a });
     } else if (msg.e === "depthUpdate" || (msg.lastUpdateId && msg.bids && msg.asks)) {
-      // Partial depth: every message is a full top-N snapshot.
-      this.bids.clear(); this.asks.clear();
-      for (const [p, q] of msg.b ?? msg.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
-      for (const [p, q] of msg.a ?? msg.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(price, qty); }
-      this.emitBook();
+      this.applyDepth(msg);
     } else if (msg.e === "markPriceUpdate") {
       this.emitDerivatives({
         markPrice: num(msg.p),
@@ -178,23 +189,5 @@ export class BinanceFuturesAdapter extends BaseExchangeAdapter {
       this.emitLiquidation({ id: `bfl-${o.s}-${o.T}-${o.S}`, symbol: o.s, timestamp: o.T, price, quantity, side: o.S === "SELL" ? "long" : "short" });
     }
   }
-
-  private emitBook(): void {
-    const bids: OrderBookLevel[] = [...this.bids.entries()]
-      .sort((a, b) => b[0] - a[0])
-      .slice(0, 50)
-      .map(([price, size]) => ({ price, size, venue: this.venue }));
-    const asks: OrderBookLevel[] = [...this.asks.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .slice(0, 50)
-      .map(([price, size]) => ({ price, size, venue: this.venue }));
-    const book: NormalizedOrderBook = { venue: this.venue, symbol: this.symbol, timestamp: Date.now(), localTimestamp: Date.now(), bids, asks };
-    this.emitOrderBook(book);
-  }
-
-  protected sendPing(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ method: "LIST_SUBSCRIPTIONS", id: 3 }));
-    }
-  }
 }
+

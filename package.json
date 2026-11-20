@@ -12,6 +12,7 @@
   "dependencies": {
     "@siebly/hyperliquid-api": "1.0.3",
     "@types/ws": "^8.18.2",
+    "binance": "3.6.12",
     "bitget-api": "3.2.8",
     "bybit-api": "4.8.5",
     "coinbase-api": "1.3.1",

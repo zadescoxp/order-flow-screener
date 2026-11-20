@@ -11,62 +11,11 @@ import { OKXFuturesAdapter, OKXSpotAdapter } from "./okx";
 import { BitgetFuturesAdapter, BitgetSpotAdapter } from "./bitget";
 import { HyperliquidAdapter } from "./hyperliquid";
 import { CoinbaseSpotAdapter } from "./coinbase";
+import { BinanceFuturesAdapter, BinanceSpotAdapter } from "./binance";
 
-export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter, CoinbaseSpotAdapter };
+export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter, CoinbaseSpotAdapter, BinanceFuturesAdapter, BinanceSpotAdapter };
 
 type DeribitLevel = [number, number] | [string, number, number];
-
-// ============================================================
-// BINANCE SPOT ADAPTER
-// ============================================================
-export class BinanceSpotAdapter extends BaseExchangeAdapter {
-  readonly venue: Venue = "binance-spot";
-  private readonly BASE_WS = "wss://stream.binance.com:9443/ws";
-
-  constructor(symbol: string) { super(symbol.toUpperCase()); }
-  protected buildWsUrl(): string { return this.BASE_WS; }
-
-  connect(): void {
-    this.setStatus("connecting");
-    this.ws = new WebSocket(this.buildWsUrl()) as unknown as WebSocket;
-    this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
-      this.lastHeartbeat = Date.now();
-      this.setStatus("live");
-      this.startPing(10_000);
-      const s = this.symbol.toLowerCase();
-      this.ws!.send(JSON.stringify({ method: "SUBSCRIBE", params: [`${s}@depth50`, `${s}@trade`], id: 1 }));
-    };
-    this.ws.onmessage = (e: MessageEvent) => {
-      this.lastHeartbeat = Date.now();
-      // Any message after a transient error means the feed has recovered.
-      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
-      try { this.handleMessage(JSON.parse(e.data as string)); } catch { /**/ }
-    };
-    this.ws.onerror = () => this.setStatus("error");
-    this.ws.onclose = () => { this.stopPing(); if (this.status !== "offline") { this.setStatus("connecting"); this.reconnect(); } };
-  }
-
-  disconnect(): void { this.setStatus("offline"); this.stopPing(); this.ws?.close(); this.ws = null; }
-
-  protected handleMessage(raw: unknown): void {
-    const msg = raw as any;
-    if (msg.e === "trade") {
-      const price = parseFloat(msg.p), qty = parseFloat(msg.q);
-      this.emitTrade({ id: `bs-${msg.t}`, venue: this.venue, symbol: msg.s, timestamp: msg.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: msg.m ? "sell" : "buy", marketType: "spot", sequence: msg.t });
-    } else if (msg.lastUpdateId && msg.bids && msg.asks) {
-      this.bids.clear(); this.asks.clear();
-      for (const [p, q] of msg.bids) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(price, qty); }
-      for (const [p, q] of msg.asks) { const price = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(price, qty); }
-      emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
-    }
-  }
-
-  protected sendPing(): void { if (Date.now() - this.lastHeartbeat > this.staleThresholdMs) this.setStatus("stale"); }
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
-  private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }
-}
 
 // ============================================================
 // DERIBIT ADAPTER (BTC/ETH perpetuals)
@@ -177,10 +126,7 @@ export class DeribitAdapter extends BaseExchangeAdapter {
 export function createAdapter(venue: Venue, symbol: string): BaseExchangeAdapter | null {
   switch (venue) {
     case "finnhub-forex": return new FinnhubForexAdapter(symbol);
-    case "binance-futures": {
-      const { BinanceFuturesAdapter } = require("./binanceFutures");
-      return new BinanceFuturesAdapter(symbol) as BaseExchangeAdapter;
-    }
+    case "binance-futures": return new BinanceFuturesAdapter(symbol);
     case "bybit-futures":   return new BybitFuturesAdapter(symbol);
     case "bybit-spot":      return new BybitSpotAdapter(symbol);
     case "okx-futures":     return new OKXFuturesAdapter(symbol);

@@ -10,7 +10,7 @@ import {
   BitgetFuturesAdapter,
   BitgetSpotAdapter,
 } from "@/lib/adapters/exchanges";
-import { BinanceFuturesAdapter } from "@/lib/adapters/binanceFutures";
+import { BinanceFuturesAdapter } from "@/lib/adapters/binance";
 import type { BaseExchangeAdapter } from "@/lib/adapters/base";
 
 function feed(adapter: BaseExchangeAdapter, payload: unknown): void {
