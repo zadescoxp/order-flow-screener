@@ -11,6 +11,7 @@ import type {
   LiquidationSide,
 } from "@/lib/types/market";
 import { FinnhubForexAdapter } from "./forex";
+import { WebsocketClient as BybitWsClient } from "bybit-api";
 
 // ─── Helpers ─────────────────────────────────────────────────
 type DeribitLevel = [number, number] | [string, number, number];
@@ -58,7 +59,10 @@ function emitBook(
 }
 
 // ============================================================
-// BYBIT FUTURES ADAPTER
+// BYBIT ADAPTERS (Siebly `bybit-api` transport)
+// The SDK owns the socket: heartbeats with pong timeouts, reconnect, and
+// resubscribing every topic after a reconnect. We keep normalization and the
+// local book; status follows the SDK lifecycle and subscription acks.
 // ============================================================
 interface BybitTradeItem {
   T: number; S: "Buy" | "Sell"; v: string; p: string; i: string; s: string;
@@ -66,60 +70,209 @@ interface BybitTradeItem {
 interface BybitDepthData {
   s: string; b: [string, string][]; a: [string, string][]; u: number; seq: number;
 }
+interface BybitResponse {
+  op?: string; success?: boolean; ret_msg?: string;
+}
 
-export class BybitFuturesAdapter extends BaseExchangeAdapter {
-  readonly venue: Venue = "bybit-futures";
-  private readonly BASE_WS = "wss://stream.bybit.com/v5/public/linear";
+type BybitCategory = "linear" | "spot";
+
+/** Keep SDK chatter out of the console; surface only its errors. */
+const BYBIT_SDK_LOGGER = {
+  trace: () => {},
+  info: () => {},
+  error: (...params: unknown[]) => console.warn("[bybit-api]", ...params),
+};
+
+/**
+ * Shut a client down for good.
+ *
+ * bybit-api 4.8.5 only honours close() on a settled connection: closing while
+ * a socket is still opening (or from a "reconnected" listener) is overwritten
+ * to CONNECTED by its onWsOpen, leaving an orphan socket or a reconnect loop.
+ * So close whatever is connected now, and keep checking until the SDK has
+ * dropped every connection key (an intentional close deletes the key).
+ */
+function disposeBybitClient(client: BybitWsClient): void {
+  client.removeAllListeners();
+  client.on("exception", () => {}); // late events from closing sockets
+  const store = client.getWsStore();
+  let checks = 0;
+  const sweep = () => {
+    const keys = store.getKeys();
+    for (const key of keys) if (client.isConnected(key)) client.close(key, true);
+    if (keys.length === 0 || ++checks > 120) clearInterval(timer);
+  };
+  const timer = setInterval(sweep, 250);
+  sweep();
+}
+
+abstract class BybitAdapter extends BaseExchangeAdapter {
+  protected abstract readonly category: BybitCategory;
+  protected abstract readonly marketType: "perpetual" | "spot";
+  protected abstract readonly tradeIdPrefix: string;
+  protected abstract readonly bookTopicDepth: number;
+  protected extraTopics(): string[] { return []; }
+
+  private client: BybitWsClient | null = null;
+  private offline = false;
   private lastSeq = 0;
+  /** True until a book snapshot arrives; deltas before it would build a partial book. */
+  private awaitingSnapshot = true;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
 
   constructor(symbol: string) { super(symbol.toUpperCase()); }
-  protected buildWsUrl(): string { return this.BASE_WS; }
+
+  /** Transport is owned by the SDK. */
+  protected buildWsUrl(): string { return ""; }
+  /** The SDK sends pings and drops the socket when a pong is late. */
+  protected sendPing(): void {}
+
+  private get bookTopic(): string { return `orderbook.${this.bookTopicDepth}.${this.symbol}`; }
+  private topics(): string[] { return [`publicTrade.${this.symbol}`, this.bookTopic, ...this.extraTopics()]; }
 
   connect(): void {
+    this.teardown();
+    this.offline = false;
+    this.resetBook();
     this.setStatus("connecting");
-    this.ws = new WebSocket(this.buildWsUrl()) as unknown as WebSocket;
-    this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
+
+    const client = new BybitWsClient(
+      { market: "v5", pingInterval: 10_000, pongTimeout: 5_000, reconnectTimeout: 1_000 },
+      BYBIT_SDK_LOGGER
+    );
+    this.client = client;
+
+    client.on("update", (msg: unknown) => {
       this.lastHeartbeat = Date.now();
-      this.setStatus("live");
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [`publicTrade.${this.symbol}`, `orderbook.1000.${this.symbol}`, `tickers.${this.symbol}`, `allLiquidation.${this.symbol}`] }));
-      this.startPing(20_000);
-    };
-    this.ws.onmessage = (e: MessageEvent) => {
-      this.lastHeartbeat = Date.now();
-      // Any message after a transient error means the feed has recovered.
-      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
-      try { const m = JSON.parse(e.data as string); if (m.op === "pong") return; if (m.topic) this.handleMessage(m); } catch { /**/ }
-    };
-    this.ws.onerror = () => this.setStatus("error");
-    this.ws.onclose = () => { this.stopPing(); if (this.status !== "offline") { this.setStatus("connecting"); this.reconnect(); } };
+      if (this.status !== "live") this.markLive();
+      try {
+        this.handleMessage(msg);
+      } catch (error) {
+        this.reportError(`Unable to parse ${this.venue} message: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+    client.on("response", (res: BybitResponse) => {
+      if (res.op !== "subscribe") return;
+      if (res.success) this.markLive();
+      else this.reportError(`Bybit rejected subscription: ${res.ret_msg ?? "unknown reason"}`, "subscribe-rejected");
+    });
+    client.on("reconnect", () => {
+      if (this.offline) return;
+      this.reconnectAttempts++;
+      this.resetBook();
+      this.setStatus("connecting");
+    });
+    client.on("close", () => { if (!this.offline) this.setStatus("connecting"); });
+    client.on("exception", (err: { message?: string; ret_msg?: string }) => {
+      if (this.offline) return;
+      this.reportError(`${this.venue}: ${err?.ret_msg ?? err?.message ?? "WebSocket exception"}`);
+    });
+
+    this.subscribeTopics(this.topics());
+    this.watchdog = setInterval(() => this.checkStale(), 10_000);
   }
 
-  disconnect(): void { this.setStatus("offline"); this.stopPing(); this.ws?.close(); this.ws = null; }
+  disconnect(): void {
+    this.offline = true;
+    this.teardown();
+    this.setStatus("offline");
+  }
+
+  /** A sequence gap: drop the book and resubscribe for a fresh snapshot, keeping the socket. */
+  protected requestResubscribe(): void {
+    this.resetBook();
+    this.setStatus("stale");
+    this.resubscribe([this.bookTopic]);
+  }
+
+  private markLive(): void {
+    this.reconnectAttempts = 0;
+    this.lastHeartbeat = Date.now();
+    this.errorMessage = undefined;
+    this.stateFlag = undefined;
+    if (this.status !== "live") this.setStatus("live");
+  }
+
+  /** The socket answers pings but no topic data has arrived for a while. */
+  private checkStale(): void {
+    if (this.status !== "live" || Date.now() - this.lastHeartbeat <= this.staleThresholdMs) return;
+    this.resetBook();
+    this.setStatus("stale");
+    this.resubscribe(this.topics());
+  }
+
+  private subscribeTopics(topics: string[]): void {
+    const pending = this.client?.subscribeV5(topics, this.category) ?? [];
+    for (const p of pending) Promise.resolve(p).catch(() => {});
+  }
+
+  private resubscribe(topics: string[]): void {
+    const pending = this.client?.unsubscribeV5(topics, this.category) ?? [];
+    for (const p of pending) Promise.resolve(p).catch(() => {});
+    this.subscribeTopics(topics);
+  }
+
+  private resetBook(): void {
+    this.bids.clear();
+    this.asks.clear();
+    this.lastSeq = 0;
+    this.awaitingSnapshot = true;
+  }
+
+  private teardown(): void {
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = null;
+    const client = this.client;
+    this.client = null;
+    if (!client) return;
+    disposeBybitClient(client);
+  }
 
   protected handleMessage(raw: unknown): void {
-    const msg = raw as { topic: string; type: string; data: unknown };
+    const msg = raw as { topic?: string; type?: string; data: unknown };
+    if (!msg.topic) return;
     if (msg.topic.startsWith("publicTrade.")) {
       for (const t of msg.data as BybitTradeItem[]) {
         const price = parseFloat(t.p), qty = parseFloat(t.v);
-        this.emitTrade({ id: `bb-${t.i}`, venue: this.venue, symbol: t.s, timestamp: t.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.S === "Buy" ? "buy" : "sell", marketType: "perpetual" });
+        this.emitTrade({ id: `${this.tradeIdPrefix}-${t.i}`, venue: this.venue, symbol: t.s, timestamp: t.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.S === "Buy" ? "buy" : "sell", marketType: this.marketType });
       }
     } else if (msg.topic.startsWith("orderbook.")) {
       const data = msg.data as BybitDepthData;
-      if (msg.type === "snapshot") { this.bids.clear(); this.asks.clear(); this.lastSeq = 0; }
-      if (msg.type === "delta" && this.lastSeq > 0 && data.u > this.lastSeq + 1) {
+      if (msg.type === "snapshot") {
         this.bids.clear();
         this.asks.clear();
+        this.awaitingSnapshot = false;
+      } else if (this.awaitingSnapshot) {
+        return;
+      } else if (this.lastSeq > 0 && data.u > this.lastSeq + 1) {
         this.requestResubscribe();
         return;
       }
-      for (const [p, q] of data.b) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
-      for (const [p, q] of data.a) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
+      applyLevels(this.bids, data.b, 1);
+      applyLevels(this.asks, data.a, 1);
       this.lastSeq = data.u;
       emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
-    } else if (msg.topic.startsWith("tickers.")) {
+    } else {
+      this.handleExtraTopic?.(msg.topic, msg.data);
+    }
+  }
+
+  protected handleExtraTopic?(topic: string, data: unknown): void;
+}
+
+export class BybitFuturesAdapter extends BybitAdapter {
+  readonly venue: Venue = "bybit-futures";
+  protected readonly category = "linear";
+  protected readonly marketType = "perpetual";
+  protected readonly tradeIdPrefix = "bb";
+  protected readonly bookTopicDepth = 1000;
+
+  protected extraTopics(): string[] { return [`tickers.${this.symbol}`, `allLiquidation.${this.symbol}`]; }
+
+  protected handleExtraTopic(topic: string, data: unknown): void {
+    if (topic.startsWith("tickers.")) {
       // Snapshot first, then deltas carrying only the fields that changed.
-      const t = msg.data as Record<string, string | undefined>;
+      const t = data as Record<string, string | undefined>;
       this.emitDerivatives({
         openInterest: num(t.openInterest),
         fundingRate: num(t.fundingRate),
@@ -128,86 +281,21 @@ export class BybitFuturesAdapter extends BaseExchangeAdapter {
         markPrice: num(t.markPrice),
         indexPrice: num(t.indexPrice),
       });
-    } else if (msg.topic.startsWith("allLiquidation.")) {
+    } else if (topic.startsWith("allLiquidation.")) {
       // S is the liquidated position side: Buy = long position liquidated.
-      for (const l of msg.data as Array<{ T: number; s: string; S: "Buy" | "Sell"; v: string; p: string }>) {
+      for (const l of data as Array<{ T: number; s: string; S: "Buy" | "Sell"; v: string; p: string }>) {
         this.emitLiquidation({ id: `bbl-${l.s}-${l.T}-${l.S}-${l.v}`, symbol: l.s, timestamp: l.T, price: parseFloat(l.p), quantity: parseFloat(l.v), side: l.S === "Buy" ? "long" : "short" });
       }
     }
   }
-
-  protected sendPing(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ op: "ping" }));
-    if (Date.now() - this.lastHeartbeat > this.staleThresholdMs) this.setStatus("stale");
-  }
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
-  private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }
 }
 
-// ============================================================
-// BYBIT SPOT ADAPTER
-// ============================================================
-export class BybitSpotAdapter extends BaseExchangeAdapter {
+export class BybitSpotAdapter extends BybitAdapter {
   readonly venue: Venue = "bybit-spot";
-  private readonly BASE_WS = "wss://stream.bybit.com/v5/public/spot";
-  private lastSeq = 0;
-
-  constructor(symbol: string) { super(symbol.toUpperCase()); }
-  protected buildWsUrl(): string { return this.BASE_WS; }
-
-  connect(): void {
-    this.setStatus("connecting");
-    this.ws = new WebSocket(this.buildWsUrl()) as unknown as WebSocket;
-    this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
-      this.lastHeartbeat = Date.now();
-      this.setStatus("live");
-      this.ws!.send(JSON.stringify({ op: "subscribe", args: [`publicTrade.${this.symbol}`, `orderbook.200.${this.symbol}`] }));
-      this.startPing(20_000);
-    };
-    this.ws.onmessage = (e: MessageEvent) => {
-      this.lastHeartbeat = Date.now();
-      // Any message after a transient error means the feed has recovered.
-      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
-      try { const m = JSON.parse(e.data as string); if (m.op === "pong") return; if (m.topic) this.handleMessage(m); } catch { /**/ }
-    };
-    this.ws.onerror = () => this.setStatus("error");
-    this.ws.onclose = () => { this.stopPing(); if (this.status !== "offline") { this.setStatus("connecting"); this.reconnect(); } };
-  }
-
-  disconnect(): void { this.setStatus("offline"); this.stopPing(); this.ws?.close(); this.ws = null; }
-
-  protected handleMessage(raw: unknown): void {
-    const msg = raw as { topic: string; type: string; data: unknown };
-    if (msg.topic.startsWith("publicTrade.")) {
-      for (const t of msg.data as BybitTradeItem[]) {
-        const price = parseFloat(t.p), qty = parseFloat(t.v);
-        this.emitTrade({ id: `bbs-${t.i}`, venue: this.venue, symbol: t.s, timestamp: t.T, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.S === "Buy" ? "buy" : "sell", marketType: "spot" });
-      }
-    } else if (msg.topic.startsWith("orderbook.")) {
-      const data = msg.data as BybitDepthData;
-      if (msg.type === "snapshot") { this.bids.clear(); this.asks.clear(); this.lastSeq = 0; }
-      if (msg.type === "delta" && this.lastSeq > 0 && data.u > this.lastSeq + 1) {
-        this.bids.clear();
-        this.asks.clear();
-        this.requestResubscribe();
-        return;
-      }
-      for (const [p, q] of data.b) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.bids.delete(price); else this.bids.set(price, qty); }
-      for (const [p, q] of data.a) { const price = parseFloat(p), qty = parseFloat(q); if (qty === 0) this.asks.delete(price); else this.asks.set(price, qty); }
-      this.lastSeq = data.u;
-      emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
-    }
-  }
-
-  protected sendPing(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ op: "ping" }));
-    if (Date.now() - this.lastHeartbeat > this.staleThresholdMs) this.setStatus("stale");
-  }
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
-  private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }
+  protected readonly category = "spot";
+  protected readonly marketType = "spot";
+  protected readonly tradeIdPrefix = "bbs";
+  protected readonly bookTopicDepth = 200;
 }
 
 // ============================================================

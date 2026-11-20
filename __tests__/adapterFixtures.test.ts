@@ -70,6 +70,33 @@ describe("exchange adapter payload fixtures", () => {
     });
   });
 
+  it("builds the Bybit book only from a snapshot and resyncs on a sequence gap", () => {
+    const adapter = new BybitFuturesAdapter("BTCUSDT");
+    const books: Array<{ bids: Array<{ price: number }>; asks: Array<{ price: number }> }> = [];
+    const statuses: string[] = [];
+    adapter.on("orderbook", (book) => books.push(book));
+    adapter.on("status", (s: { status: string }) => statuses.push(s.status));
+    const delta = (u: number, b: [string, string][], a: [string, string][]) =>
+      feed(adapter, { topic: "orderbook.1000.BTCUSDT", type: "delta", data: { s: "BTCUSDT", b, a, u, seq: u } });
+
+    // Deltas before the first snapshot would build a partial book.
+    delta(1, [["49999", "1"]], [["50001", "1"]]);
+    expect(books).toHaveLength(0);
+
+    feed(adapter, { topic: "orderbook.1000.BTCUSDT", type: "snapshot", data: { s: "BTCUSDT", b: [["49999", "1"]], a: [["50001", "1"]], u: 10, seq: 10 } });
+    delta(11, [["49998", "2"]], [["50001", "0"], ["50002", "1"]]);
+    expect(books).toHaveLength(2);
+    expect(books[1].bids.map((l) => l.price)).toEqual([49999, 49998]);
+    expect(books[1].asks.map((l) => l.price)).toEqual([50002]);
+
+    // u jumps from 11 to 13: drop the book and wait for a fresh snapshot.
+    delta(13, [["49997", "1"]], []);
+    expect(statuses).toContain("stale");
+    expect(adapter.depthSides()).toBeNull();
+    delta(14, [["49996", "1"]], [["50003", "1"]]);
+    expect(books).toHaveLength(2);
+  });
+
   it.each([
     ["OKX futures", new OKXFuturesAdapter("BTCUSDT")],
     ["OKX spot", new OKXSpotAdapter("BTCUSDT")],
