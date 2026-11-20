@@ -9,8 +9,9 @@ import { BOOK_DEPTH, emitBook } from "./book";
 import { BybitFuturesAdapter, BybitSpotAdapter } from "./bybit";
 import { OKXFuturesAdapter, OKXSpotAdapter } from "./okx";
 import { BitgetFuturesAdapter, BitgetSpotAdapter } from "./bitget";
+import { HyperliquidAdapter } from "./hyperliquid";
 
-export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter };
+export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter };
 
 type DeribitLevel = [number, number] | [string, number, number];
 
@@ -61,81 +62,6 @@ export class BinanceSpotAdapter extends BaseExchangeAdapter {
   }
 
   protected sendPing(): void { if (Date.now() - this.lastHeartbeat > this.staleThresholdMs) this.setStatus("stale"); }
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
-  private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }
-}
-
-// ============================================================
-// HYPERLIQUID ADAPTER
-// ============================================================
-export class HyperliquidAdapter extends BaseExchangeAdapter {
-  readonly venue: Venue = "hyperliquid";
-  private readonly BASE_WS = "wss://api.hyperliquid.xyz/ws";
-
-  constructor(symbol: string) {
-    // Accept BTCUSDT or BTC — normalize to BTC
-    let s = symbol.toUpperCase();
-    if (s.endsWith("USDT")) s = s.replace("USDT", "");
-    super(s);
-  }
-
-  protected buildWsUrl(): string { return this.BASE_WS; }
-
-  connect(): void {
-    this.setStatus("connecting");
-    this.ws = new WebSocket(this.buildWsUrl()) as unknown as WebSocket;
-    this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
-      this.lastHeartbeat = Date.now();
-      this.setStatus("live");
-      this.ws!.send(JSON.stringify({ method: "subscribe", subscription: { type: "trades", coin: this.symbol } }));
-      this.ws!.send(JSON.stringify({ method: "subscribe", subscription: { type: "l2Book", coin: this.symbol } }));
-      this.ws!.send(JSON.stringify({ method: "subscribe", subscription: { type: "activeAssetCtx", coin: this.symbol } }));
-      this.startPing(20_000);
-    };
-    this.ws.onmessage = (e: MessageEvent) => {
-      this.lastHeartbeat = Date.now();
-      // Any message after a transient error means the feed has recovered.
-      if (this.status === "error" || this.status === "connecting") this.setStatus("live");
-      try { this.handleMessage(JSON.parse(e.data as string)); } catch { /**/ }
-    };
-    this.ws.onerror = () => this.setStatus("error");
-    this.ws.onclose = () => { this.stopPing(); if (this.status !== "offline") { this.setStatus("connecting"); this.reconnect(); } };
-  }
-
-  disconnect(): void { this.setStatus("offline"); this.stopPing(); this.ws?.close(); this.ws = null; }
-
-  protected handleMessage(raw: unknown): void {
-    const msg = raw as { channel: string; data: unknown };
-    if (msg.channel === "trades") {
-      for (const t of msg.data as Array<{ coin: string; side: "A" | "B"; px: string; sz: string; time: number; tid: number }>) {
-        const price = parseFloat(t.px), qty = parseFloat(t.sz);
-        this.emitTrade({ id: `hl-${t.tid}`, venue: this.venue, symbol: t.coin, timestamp: t.time, localTimestamp: Date.now(), price, quantity: qty, quoteVolume: price * qty, side: t.side === "B" ? "buy" : "sell", marketType: "perpetual" });
-      }
-    } else if (msg.channel === "l2Book") {
-      const book = msg.data as { coin: string; time: number; levels: [[string, string][], [string, string][]] };
-      this.bids.clear(); this.asks.clear();
-      for (const [p, q] of book.levels[0]) { const pr = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.bids.set(pr, qty); }
-      for (const [p, q] of book.levels[1]) { const pr = parseFloat(p), qty = parseFloat(q); if (qty > 0) this.asks.set(pr, qty); }
-      emitBook(this, this.bids, this.asks, (b) => this.emitOrderBook(b));
-    } else if (msg.channel === "activeAssetCtx") {
-      // Hyperliquid funds hourly, on the hour; oraclePx is its spot index.
-      const { coin, ctx } = msg.data as { coin: string; ctx: { funding?: string; openInterest?: string; markPx?: string; oraclePx?: string } };
-      if (coin !== this.symbol || !ctx) return;
-      const hour = 3_600_000;
-      this.emitDerivatives({
-        openInterest: num(ctx.openInterest),
-        fundingRate: num(ctx.funding),
-        fundingIntervalHours: 1,
-        nextFundingTime: Math.floor(Date.now() / hour) * hour + hour,
-        markPrice: num(ctx.markPx),
-        indexPrice: num(ctx.oraclePx),
-      });
-    }
-  }
-
-  protected sendPing(): void { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ method: "ping" })); }
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private startPing(ms: number) { this.pingTimer = setInterval(() => this.sendPing(), ms); }
   private stopPing() { if (this.pingTimer) clearInterval(this.pingTimer); this.pingTimer = null; }

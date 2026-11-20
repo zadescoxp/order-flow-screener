@@ -1,4 +1,4 @@
-import { DeribitAdapter, OKXFuturesAdapter, OKXSpotAdapter } from "@/lib/adapters/exchanges";
+import { DeribitAdapter, HyperliquidAdapter, OKXFuturesAdapter, OKXSpotAdapter } from "@/lib/adapters/exchanges";
 import type { BaseExchangeAdapter } from "@/lib/adapters/base";
 import type { NormalizedOrderBook, VenueConnection } from "@/lib/types/market";
 import { venueSupports, venuesForSelection } from "@/lib/adapters/capabilities";
@@ -54,6 +54,19 @@ describe("OKX books channel", () => {
     expect(adapter.depthSides()).toBeNull();
     feed(adapter, { arg: { channel: "books" }, action: "update", data: [row("96", 15, 14)] });
     expect(books).toHaveLength(2);
+  });
+});
+
+describe("Hyperliquid l2Book channel", () => {
+  it("reads { px, sz, n } levels as sent on the wire, replacing the book each push", () => {
+    const adapter = new HyperliquidAdapter("BTCUSDT");
+    const { books } = capture(adapter);
+    const push = (bid: string, ask: string) => feed(adapter, { channel: "l2Book", data: { coin: "BTC", time: 1, levels: [[{ px: bid, sz: "2", n: 3 }], [{ px: ask, sz: "1.5", n: 1 }]] } });
+    push("100", "101");
+    push("99", "100");
+    expect(books).toHaveLength(2);
+    expect(books[1].bids).toEqual([expect.objectContaining({ price: 99, size: 2 })]);
+    expect(books[1].asks).toEqual([expect.objectContaining({ price: 100, size: 1.5 })]);
   });
 });
 

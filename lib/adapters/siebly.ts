@@ -14,10 +14,16 @@
 
 import { BaseExchangeAdapter } from "./base";
 
-/** The parts of a Siebly WebsocketClient this base relies on. */
-export interface SieblyClient {
-  on(event: string, listener: (...args: never[]) => void): unknown;
+/** Every Siebly WebsocketClient is an event emitter. */
+export interface SieblyEmitter {
+  // Typed per SDK (event maps differ), so only the shape is required here.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(event: any, listener: any): unknown;
   removeAllListeners(): unknown;
+}
+
+/** The parts of a classic Siebly WebsocketClient the shutdown sweep relies on. */
+export interface SieblyClient extends SieblyEmitter {
   close(wsKey: never, force?: boolean): void;
   isConnected(wsKey: never): boolean;
   getWsStore(): { getKeys(): unknown[] };
@@ -59,7 +65,17 @@ export function disposeSieblyClient(client: SieblyClient): void {
 /** Outcome of a command reply: a subscription ack, a rejection, or unrelated. */
 export type AckResult = { ok: true } | { ok: false; reason: string } | null;
 
-export abstract class SieblyAdapter<C extends SieblyClient, T> extends BaseExchangeAdapter {
+/**
+ * Event names differ between SDK generations: the classic base emits "update"
+ * and "reconnect"; the newer one (e.g. @siebly/hyperliquid-api) emits
+ * "message" and "reconnecting".
+ */
+export interface SieblyEventNames {
+  data: string;
+  reconnecting: string;
+}
+
+export abstract class SieblyAdapter<C extends SieblyEmitter, T> extends BaseExchangeAdapter {
   /** Build the SDK client (dynamic import + options). */
   protected abstract createClient(): Promise<C>;
   /** Every topic this adapter needs. */
@@ -70,6 +86,11 @@ export abstract class SieblyAdapter<C extends SieblyClient, T> extends BaseExcha
   protected abstract unsubscribeTopics(client: C, topics: T[]): unknown;
   /** Classify a "response" event. */
   protected abstract ackOf(response: unknown): AckResult;
+  protected readonly events: SieblyEventNames = { data: "update", reconnecting: "reconnect" };
+  /** Shut a client down for good; classic clients need the sweep. */
+  protected disposeClient(client: C): void {
+    disposeSieblyClient(client as unknown as SieblyClient);
+  }
 
   private client: C | null = null;
   private offline = false;
@@ -96,7 +117,7 @@ export abstract class SieblyAdapter<C extends SieblyClient, T> extends BaseExcha
     Promise.all([this.createClient(), this.prepare()])
       .then(([client]) => {
         if (generation !== this.generation || this.offline) {
-          disposeSieblyClient(client);
+          this.disposeClient(client);
           return;
         }
         this.client = client;
@@ -119,7 +140,7 @@ export abstract class SieblyAdapter<C extends SieblyClient, T> extends BaseExcha
 
   private wire(client: C): void {
     const on = client.on.bind(client) as (event: string, listener: (arg: never) => void) => unknown;
-    on("update", (msg: unknown) => {
+    on(this.events.data, (msg: unknown) => {
       this.lastHeartbeat = Date.now();
       if (this.status !== "live") this.markLive();
       try {
@@ -134,16 +155,16 @@ export abstract class SieblyAdapter<C extends SieblyClient, T> extends BaseExcha
       if (ack.ok) this.markLive();
       else this.reportError(`${this.venue} rejected subscription: ${ack.reason}`, "subscribe-rejected");
     });
-    on("reconnect", () => {
+    on(this.events.reconnecting, () => {
       if (this.offline) return;
       this.reconnectAttempts++;
       this.resetBook();
       this.setStatus("connecting");
     });
     on("close", () => { if (!this.offline) this.setStatus("connecting"); });
-    on("exception", (err: { message?: string; msg?: string; ret_msg?: string }) => {
+    on("exception", (err: unknown) => {
       if (this.offline) return;
-      this.reportError(`${this.venue}: ${err?.ret_msg ?? err?.msg ?? err?.message ?? "WebSocket exception"}`);
+      this.reportError(`${this.venue}: ${exceptionMessage(err)}`);
     });
   }
 
@@ -192,8 +213,16 @@ export abstract class SieblyAdapter<C extends SieblyClient, T> extends BaseExcha
     this.watchdog = null;
     const client = this.client;
     this.client = null;
-    if (client) disposeSieblyClient(client);
+    if (client) this.disposeClient(client);
   }
+}
+
+/** Best-effort text from the different exception shapes the SDKs emit. */
+function exceptionMessage(err: unknown): string {
+  const e = err as { ret_msg?: string; msg?: string; message?: string; data?: unknown; event?: unknown } | undefined;
+  const nested = e?.event as { msg?: string; message?: string; data?: unknown } | undefined;
+  const text = e?.ret_msg ?? e?.msg ?? e?.message ?? nested?.msg ?? nested?.message ?? nested?.data ?? e?.data;
+  return typeof text === "string" && text ? text : "WebSocket exception";
 }
 
 /** SDK subscribe calls may return promises (or arrays of them) that reject on reconnect. */
