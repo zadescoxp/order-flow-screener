@@ -31,6 +31,8 @@ export const VENUE_CONFIG: Record<Venue, VenueConfig | undefined> = {
   "kucoin-spot": undefined,
   "kraken-futures": undefined,
   "kraken-spot": undefined,
+  "htx-futures": undefined,
+  "htx-spot": undefined,
   "finnhub-forex": {
     venue: "finnhub-forex",
     assetClass: "forex",

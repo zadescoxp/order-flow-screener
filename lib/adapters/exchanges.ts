@@ -15,8 +15,9 @@ import { BinanceFuturesAdapter, BinanceSpotAdapter } from "./binance";
 import { GateFuturesAdapter, GateSpotAdapter } from "./gate";
 import { KucoinFuturesAdapter, KucoinSpotAdapter } from "./kucoin";
 import { KrakenFuturesAdapter, KrakenSpotAdapter } from "./kraken";
+import { HtxFuturesAdapter, HtxSpotAdapter } from "./htx";
 
-export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter, CoinbaseSpotAdapter, BinanceFuturesAdapter, BinanceSpotAdapter, GateFuturesAdapter, GateSpotAdapter, KucoinFuturesAdapter, KucoinSpotAdapter, KrakenFuturesAdapter, KrakenSpotAdapter };
+export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter, CoinbaseSpotAdapter, BinanceFuturesAdapter, BinanceSpotAdapter, GateFuturesAdapter, GateSpotAdapter, KucoinFuturesAdapter, KucoinSpotAdapter, KrakenFuturesAdapter, KrakenSpotAdapter, HtxFuturesAdapter, HtxSpotAdapter };
 
 type DeribitLevel = [number, number] | [string, number, number];
 
@@ -145,6 +146,8 @@ export function createAdapter(venue: Venue, symbol: string): BaseExchangeAdapter
     case "kucoin-spot": return new KucoinSpotAdapter(symbol);
     case "kraken-futures": return new KrakenFuturesAdapter(symbol);
     case "kraken-spot": return new KrakenSpotAdapter(symbol);
+    case "htx-futures": return new HtxFuturesAdapter(symbol);
+    case "htx-spot": return new HtxSpotAdapter(symbol);
     case "deribit":         return new DeribitAdapter(symbol);
     default:                return null;
   }
