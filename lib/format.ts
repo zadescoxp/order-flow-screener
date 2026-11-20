@@ -91,6 +91,8 @@ export const VENUE_SHORT: Record<string, string> = {
   hyperliquid: "HYP",
   deribit: "DRB",
   "coinbase-spot": "CB",
+  "gate-futures": "GATE",
+  "gate-spot": "GATE",
   "finnhub-forex": "FX",
 };
 
@@ -106,6 +108,8 @@ export const VENUE_LABEL: Record<string, string> = {
   hyperliquid: "Hyperliquid",
   deribit: "Deribit",
   "coinbase-spot": "Coinbase",
+  "gate-futures": "Gate Perp",
+  "gate-spot": "Gate Spot",
   "finnhub-forex": "FX Feed",
   "all-perps": "All Perps",
   "all-spot": "All Spot",

@@ -25,6 +25,8 @@ export const VENUE_CONFIG: Record<Venue, VenueConfig | undefined> = {
   hyperliquid: undefined,
   deribit: undefined,
   "coinbase-spot": undefined,
+  "gate-futures": undefined,
+  "gate-spot": undefined,
   "finnhub-forex": {
     venue: "finnhub-forex",
     assetClass: "forex",

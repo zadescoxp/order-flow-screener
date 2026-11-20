@@ -12,8 +12,9 @@ import { BitgetFuturesAdapter, BitgetSpotAdapter } from "./bitget";
 import { HyperliquidAdapter } from "./hyperliquid";
 import { CoinbaseSpotAdapter } from "./coinbase";
 import { BinanceFuturesAdapter, BinanceSpotAdapter } from "./binance";
+import { GateFuturesAdapter, GateSpotAdapter } from "./gate";
 
-export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter, CoinbaseSpotAdapter, BinanceFuturesAdapter, BinanceSpotAdapter };
+export { BOOK_DEPTH, BybitFuturesAdapter, BybitSpotAdapter, OKXFuturesAdapter, OKXSpotAdapter, BitgetFuturesAdapter, BitgetSpotAdapter, HyperliquidAdapter, CoinbaseSpotAdapter, BinanceFuturesAdapter, BinanceSpotAdapter, GateFuturesAdapter, GateSpotAdapter };
 
 type DeribitLevel = [number, number] | [string, number, number];
 
@@ -136,6 +137,8 @@ export function createAdapter(venue: Venue, symbol: string): BaseExchangeAdapter
     case "bitget-futures":  return new BitgetFuturesAdapter(symbol);
     case "bitget-spot":     return new BitgetSpotAdapter(symbol);
     case "coinbase-spot":   return new CoinbaseSpotAdapter(symbol);
+    case "gate-futures": return new GateFuturesAdapter(symbol);
+    case "gate-spot": return new GateSpotAdapter(symbol);
     case "deribit":         return new DeribitAdapter(symbol);
     default:                return null;
   }
