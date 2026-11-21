@@ -1,5 +1,23 @@
 # Order Flow Tracker
 
+**v2.4** — every crypto feed now runs on [Siebly](https://siebly.io)'s exchange
+SDKs, with managed heartbeats, reconnects and resubscription. Gate, KuCoin,
+Kraken and HTX join as new venues (10 exchanges, 19 markets), venue logos are
+proper brand tiles, and the Perp / Spot switch stays on your exchange and
+disables markets it does not have.
+
+<p>
+  <a href="https://siebly.io">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/media/siebly-logo-dark.svg">
+      <img alt="Siebly" src="docs/media/siebly-logo-light.svg" width="260">
+    </picture>
+  </a>
+</p>
+
+Crypto market data is sourced through the [Siebly](https://siebly.io) exchange
+SDKs. See [Market data by Siebly](#market-data-by-siebly).
+
 **v2.3** — venue logos on liquidation and block-print bubbles, 122 verified
 coins plus gold and silver perps and 20 FX pairs, and custom grid layouts you
 can save:
@@ -27,11 +45,13 @@ manage orders, connect to brokerage accounts, or manage portfolios.
 ## Overview
 
 The terminal combines live WebSocket market data with a normalized order-flow
-engine. Exchange-specific payloads are converted into common trade and order
-book structures before they are processed by the charts and analytics panels.
+engine. Crypto feeds are opened through the [Siebly](https://siebly.io)
+exchange SDKs; exchange-specific payloads are converted into common trade and
+order book structures before they are processed by the charts and analytics
+panels.
 
 ```text
-WebSocket feeds
+Exchange WebSockets (Siebly SDKs)
     -> market adapters
     -> normalized market data
     -> order-flow engine
@@ -91,7 +111,11 @@ footprint header; on by default in the Liquidity workspace).
 | OKX | `books` (400 levels) |
 | Bitget | `books` (full incremental book) |
 | Coinbase spot | `level2` (full book) |
-| Hyperliquid, Deribit, Binance spot | 20 – 50 levels |
+| Kraken spot | `book` (100 levels) |
+| Kraken perp | `book` (full incremental book) |
+| HTX | `depth.step0` (150 levels) |
+| KuCoin | `level2Depth50` (50 levels) |
+| Hyperliquid, Deribit, Binance spot, Gate | 20 – 50 levels |
 
 Recordings store these snapshots, so a replayed heatmap matches the live one.
 
@@ -224,8 +248,8 @@ volatility study.
 ### Liquidations (perpetuals)
 
 Forced closes from the venues that publish a public liquidation stream:
-Binance, Bybit, OKX and Deribit. Bitget and Hyperliquid do not publish one,
-and the panel lists them as having no feed.
+Binance, Bybit, OKX, Deribit, Gate and Kraken. Bitget, Hyperliquid, KuCoin and
+HTX do not publish one, and the panel lists them as having no feed.
 
 - Long liquidations (forced sells) above the zero line, short liquidations
   (forced buys) below, in quote notional per 15s / 1m / 5m bucket
@@ -266,10 +290,15 @@ Moves under 0.05% in price or 0.1% in open interest count as flat
 | Bitget | `ticker` | `ticker` | `ticker` | — |
 | Hyperliquid | `activeAssetCtx` | `activeAssetCtx` (hourly) | mark / oracle price | — |
 | Deribit | `ticker` (USD, converted) | `funding_8h` | `ticker` | `liquidation` flag on trades |
+| Gate | `futures.tickers` | `futures.tickers` | `futures.tickers` | `futures.public_liquidates` |
+| KuCoin | REST poll (10s) | `/contract/instrument` | `/contract/instrument` | — |
+| Kraken | `ticker` | `ticker` (hourly) | `ticker` | liquidation fills on `trade` |
+| HTX | REST poll (10s) | REST poll (10s) | — | — |
 
 Binance USD-M routes streams by category: trades, mark price and liquidations
-are read from `/market/ws` and partial depth from `/public/ws`. The legacy
-`/ws` route accepts subscriptions but delivers no data.
+are served from `/market` and partial depth from `/public`; the Siebly SDK
+routes each topic to the right one. Perpetual sizes quoted in contracts (OKX,
+Gate, KuCoin, HTX) are converted to base units with each contract's size.
 
 ### Alerts
 
@@ -320,8 +349,13 @@ The **Export** menu downloads:
 ### Workspace controls
 
 - Crypto and Forex asset-class switching
-- Crypto spot and perpetual market selection
-- Supported venue selection for crypto
+- Crypto spot and perpetual market selection. Switching keeps the selected
+  exchange (Bybit Perp → Bybit Spot, All perps → All spot); when the exchange
+  has no such market (Hyperliquid and Deribit have no spot, Coinbase no
+  perpetuals) or does not list the coin there, that side of the switch is
+  disabled with a tooltip explaining why
+- Supported venue selection for crypto; exchanges without the selected market
+  or coin are listed but disabled
 - Currency-pair selection for Forex
 - Timeframe selection from one minute to four hours
 - Workspace presets for order-flow, liquidity, and volatility workflows
@@ -335,50 +369,46 @@ The **Export** menu downloads:
 
 ### Crypto instruments
 
-29 USDT pairs: BTC, ETH, XRP, BNB, SOL, DOGE, TRX, ADA, HYPE, LINK, SUI, AVAX,
-BCH, LTC, DOT, UNI, NEAR, APT, AAVE, ETC, ENA, ATOM, ARB, OP, INJ, FIL, SEI,
-TIA and WIF. Each is listed on Binance, Bybit, OKX, Bitget and Hyperliquid
-(perpetual and spot where applicable) and Coinbase spot (except TRX). Deribit
-covers BTC and ETH inverse perpetuals only. When a venue does not list the
-selected coin it is left out of the aggregate automatically.
+122 coins quoted in USDT, plus gold and silver perpetuals. The catalog in
+`lib/config/coinListings.ts` is generated from live venue tickers: a coin's
+perpetual market is listed when it trades with real 24h volume (≥ $2M per
+venue) on at least three perpetual venues, and its spot market when at least
+two of Binance, Bybit, OKX and Coinbase trade it (≥ $0.5M per venue). Gate,
+KuCoin, Kraken and HTX join a coin's existing markets where their own volume
+clears the same thresholds. Deribit covers BTC and ETH inverse perpetuals
+only. When a venue does not list the selected coin it is disabled in the
+venue picker and left out of the aggregate automatically.
 
 Coin and exchange logos are bundled in `public/coins` and `public/venues`
-(from the MIT-licensed web3icons set). HYPE, ENA, INJ and WIF use a monogram
-badge until official marks are added.
+(from the MIT-licensed web3icons set). Coins without a bundled mark use a
+monogram badge.
 
-### Crypto perpetual markets
+### Crypto venues
 
-| Venue | Adapter status |
-| --- | --- |
-| Binance Futures | Supported |
-| Bybit Futures | Supported |
-| OKX Futures | Supported |
-| Bitget Futures | Supported |
-| Hyperliquid | Supported |
-| Deribit | Supported |
-
-### Crypto spot markets
-
-| Venue | Adapter status |
-| --- | --- |
-| Binance Spot | Supported |
-| Bybit Spot | Supported |
-| OKX Spot | Supported |
-| Bitget Spot | Supported |
-| Coinbase Spot | Supported |
+| Venue | Perpetual | Spot | Data via |
+| --- | --- | --- | --- |
+| Binance | USD-M | ✓ | Siebly `binance` |
+| Bybit | Linear | ✓ | Siebly `bybit-api` |
+| OKX | Swap | ✓ | Siebly `okx-api` |
+| Bitget | USDT-M | ✓ | Siebly `bitget-api` |
+| Gate | USDT | ✓ | Siebly `gateio-api` |
+| KuCoin | USDT-M | ✓ | Siebly `kucoin-api` |
+| Kraken | `PF_` multi-collateral | ✓ (BASE/USD) | Siebly `@siebly/kraken-api` |
+| HTX | Linear swap | ✓ | Siebly `@siebly/htx-api` |
+| Hyperliquid | ✓ | — | Siebly `@siebly/hyperliquid-api` |
+| Coinbase | — | Advanced Trade | Siebly `coinbase-api` |
+| Deribit | BTC / ETH inverse | — | Direct WebSocket (no Siebly SDK) |
 
 ### Forex
 
 Forex currently uses Finnhub as the internal data source. The provider is not
 selectable in the user interface. Users choose only the currency pair.
 
-Available pairs:
-
-- EUR/USD
-- GBP/USD
-- USD/JPY
-- AUD/USD
-- USD/CAD
+20 pairs are available: the seven majors (EUR/USD, GBP/USD, USD/JPY,
+USD/CHF, AUD/USD, USD/CAD, NZD/USD) and 13 crosses and exotics that the stream
+was observed to tick (`FOREX_SYMBOLS` in `lib/config/venues.ts`). Gold and
+silver are offered as perpetual order flow instead, because their Finnhub
+ticks are too sparse.
 
 Forex subscriptions use Finnhub's OANDA symbol namespace internally. For
 example, EUR/USD is subscribed as `OANDA:EUR_USD`.
@@ -411,9 +441,12 @@ not passed into analytics.
 - A Finnhub API key for Forex mode
 - Network access to the selected WebSocket market-data feeds
 
-Crypto adapters may require additional exchange-specific configuration as the
-project evolves. Review the adapter and venue configuration files before
-deploying a new venue.
+Crypto feeds need no API keys: every venue uses public market data only.
+KuCoin and HTX send no CORS headers on their REST APIs, so two small route
+handlers (`app/api/kucoin`, `app/api/htx`) relay a fixed allowlist of public
+calls (KuCoin's WebSocket token, contract sizes, open interest and funding).
+Run the app with its server (`npm run start`, Docker or a host such as Vercel);
+a static export would leave those two venues without data.
 
 ## Installation
 
@@ -550,8 +583,11 @@ Next.js build files across runs. Docker Desktop enables BuildKit by default.
 9. Use the theme selector to change the visual theme without changing
    analytical behavior.
 
-The connection status strip reports the current data-source state. If a feed
-disconnects, the adapter retries with an increasing reconnect delay.
+The connection status strip reports the current data-source state. A venue
+goes live once the exchange acknowledges the subscription. The Siebly SDKs
+send heartbeats and reconnect a dead or dropped socket automatically, then
+resubscribe; order books wait for a fresh snapshot before they are shown
+again.
 
 ## Project structure
 
@@ -596,11 +632,24 @@ hooks/
 lib/config/
   instruments.ts           Crypto instrument catalog and logo map
 
+app/api/
+  kucoin/route.ts          Relays KuCoin's public WS token and contract details
+  htx/route.ts             Relays HTX contract size, open interest and funding
+
 lib/adapters/
-  exchanges.ts             Crypto adapters and adapter factory
-  binanceFutures.ts        Binance USD-M adapter (market + public routes)
+  siebly.ts                Shared Siebly SDK lifecycle (acks, reconnects,
+                           snapshot gating, stale watchdog, shutdown)
+  binance.ts, bybit.ts, okx.ts, bitget.ts, coinbase.ts, hyperliquid.ts,
+  gate.ts, kucoin.ts, kraken.ts, htx.ts
+                           One adapter file per exchange
+  book.ts                  Shared order-book helpers
+  exchanges.ts             Deribit adapter and the adapter factory
   forex.ts                 Finnhub Forex adapter
-  capabilities.ts          Venue and symbol capability checks
+  capabilities.ts          Venue, symbol and market capability checks
+
+lib/shims/
+  https.browser.js         Browser stand-ins for the Node modules the SDKs
+  crypto.browser.js        import for REST and private signing (unused here)
 
 lib/engine/
   orderFlowEngine.ts       Candle, footprint, volume profile and OBI logic
@@ -664,6 +713,13 @@ Check the browser console and confirm that `.env.local` contains a valid
 `NEXT_PUBLIC_FINNHUB_API_KEY` for Forex mode. Restart the development server
 after changing environment variables.
 
+### KuCoin or HTX never go live
+
+These two venues fetch a token or contract details through the app's own
+`/api/kucoin` and `/api/htx` routes. Make sure the app runs with its server
+(`npm run dev`, `npm run start` or Docker) and that the server can reach
+`api.kucoin.com`, `api-futures.kucoin.com` and `api.hbdm.com`.
+
 ### Forex prices are not updating
 
 Confirm that the selected pair is one of the supported pairs and that Forex
@@ -702,6 +758,25 @@ Contributions are welcome. Before opening a pull request:
 For bugs, include the selected market, venue or currency pair, timeframe,
 browser, reproduction steps, and relevant console errors. Do not include API
 keys in reports.
+
+## Market data by Siebly
+
+<a href="https://siebly.io">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/siebly-logo-dark.svg">
+    <img alt="Siebly" src="docs/media/siebly-logo-light.svg" width="220">
+  </picture>
+</a>
+
+Crypto market data is sourced through [Siebly](https://siebly.io)'s
+open-source JavaScript SDKs for crypto exchange APIs
+([github.com/sieblyio](https://github.com/sieblyio)): `binance`, `bybit-api`,
+`okx-api`, `bitget-api`, `gateio-api`, `kucoin-api`, `coinbase-api`,
+`@siebly/kraken-api`, `@siebly/htx-api` and `@siebly/hyperliquid-api`. They
+handle each exchange's WebSocket connection, heartbeats, reconnects and
+resubscription; this terminal normalizes the data and runs the analytics.
+The SDKs are MIT licensed. The Siebly logo belongs to Siebly and is used here
+for attribution.
 
 ## License
 
