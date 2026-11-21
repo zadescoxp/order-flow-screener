@@ -112,6 +112,7 @@ export class MarketDataManager {
 
   // Working candle state
   private currentCandleRef: FootprintCandle | null = null;
+  private previousCandleRef: FootprintCandle | null = null; // last finalized candle, for late prints
   private allLevels: FootprintLevel[] = []; // rolling window for level z-score
   private cumulativeDelta = 0; // delta of all finalized candles
 
@@ -401,6 +402,7 @@ export class MarketDataManager {
     this.listeners.clear();
     this.books.clear();
     this.currentCandleRef = null;
+    this.previousCandleRef = null;
     this.allLevels = [];
     this.cumulativeDelta = 0;
     this.liveBar = null;
@@ -436,12 +438,22 @@ export class MarketDataManager {
 
     const candleOpenTime = getCandleOpenTime(trade.timestamp, this.currentTimeframe);
 
+    // Candles only ever move forward. With several venues aggregated, a slower
+    // one (HTX runs ~2-3 s behind) still sends prints stamped before the
+    // current candle opened. Reopening the old candle for them used to split
+    // the chart into alternating duplicate columns at every boundary.
+    if (this.currentCandleRef && candleOpenTime < this.currentCandleRef.openTime) {
+      this.onLatePrint(trade, candleOpenTime);
+      return;
+    }
+
     if (!this.currentCandleRef || this.currentCandleRef.openTime !== candleOpenTime) {
       if (this.currentCandleRef) {
         const finalized = { ...this.currentCandleRef, complete: true };
         this.cumulativeDelta += finalized.delta;
         finalized.cumulativeDelta = this.cumulativeDelta;
         store.finalizeCandle(finalized);
+        this.previousCandleRef = finalized;
 
         for (const level of finalized.levels.values()) this.allLevels.push(level);
         if (this.allLevels.length > 5000) this.allLevels = this.allLevels.slice(-3000);
@@ -498,6 +510,40 @@ export class MarketDataManager {
       timestamp: trade.timestamp,
     };
 
+    this.pendingTrades.push(trade);
+    this.scheduleFlush();
+  }
+
+  /**
+   * A print stamped before the current candle opened. If it belongs to the
+   * candle that just closed, amend that candle so its footprint, delta and
+   * CVD stay right; anything older is too stale to place and stays off the
+   * footprint. Either way it still counts for the session, tape and flow bars.
+   */
+  private onLatePrint(trade: NormalizedTrade, candleOpenTime: number): void {
+    const store = this.store.getState();
+    const previous = this.previousCandleRef;
+    if (previous && previous.openTime === candleOpenTime) {
+      applyTradeToCandle(previous, trade, this.currentTickSize, this.currentImbalanceThreshold);
+      const signed = trade.side === "buy" ? trade.quantity : -trade.quantity;
+      this.cumulativeDelta += signed;
+      previous.cumulativeDelta = this.cumulativeDelta;
+      store.amendLastCandle(previous);
+      const current = this.currentCandleRef!;
+      current.cumulativeDelta = this.cumulativeDelta + current.delta;
+      this.pendingCandle = { ...current };
+      this.profileDirty = true;
+    }
+
+    if (!this.session) this.session = createSessionStats(trade.timestamp, trade.price);
+    applyTradeToSession(this.session, trade.price, trade.quantity, trade.side, Math.max(0, trade.localTimestamp - trade.timestamp));
+    if (this.session.trades >= BIG_TRADE_WARMUP_TRADES) {
+      const average = this.session.volume / this.session.trades;
+      const ratio = average > 0 ? trade.quantity / average : 0;
+      if (ratio >= BIG_TRADE_MIN_RATIO) this.pendingBigTrades.push({ ...trade, ratio });
+    }
+    this.tapeLog.push(trade);
+    this.updateFlowBar(trade);
     this.pendingTrades.push(trade);
     this.scheduleFlush();
   }
