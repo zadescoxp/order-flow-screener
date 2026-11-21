@@ -1,25 +1,44 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/Primitives";
 
 const DISMISSED_KEY = "oft-bug-report-dialog-dismissed";
 const ISSUE_URL = "https://github.com/zadescoxp/order-flow-screener/issues/new";
 const X_URL = "https://x.com/intent/post?text=I%20found%20a%20bug%20in%20the%20Order%20Flow%20Terminal";
 
-export default function BugReportDialog() {
-  const [open, setOpen] = useState(false);
+// The dismissed flag lives in localStorage; read it as an external store so
+// the server (no storage) renders nothing and the client decides after hydration.
+const listeners = new Set<() => void>();
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    listeners.delete(listener);
+    window.removeEventListener("storage", listener);
+  };
+}
+function readDismissed(): boolean {
+  try {
+    return window.localStorage.getItem(DISMISSED_KEY) === "true";
+  } catch {
+    return true; // storage blocked: don't nag
+  }
+}
 
-  useEffect(() => {
-    if (window.localStorage.getItem(DISMISSED_KEY) !== "true") setOpen(true);
-  }, []);
+export default function BugReportDialog() {
+  const dismissed = useSyncExternalStore(subscribe, readDismissed, () => true);
 
   const dismiss = () => {
-    window.localStorage.setItem(DISMISSED_KEY, "true");
-    setOpen(false);
+    try {
+      window.localStorage.setItem(DISMISSED_KEY, "true");
+    } catch {
+      /* storage blocked: the dialog still closes via the listeners below */
+    }
+    listeners.forEach((listener) => listener());
   };
 
-  if (!open) return null;
+  if (dismissed) return null;
 
   return (
     <div className="bug-dialog-backdrop" role="presentation" onMouseDown={(event) => {
