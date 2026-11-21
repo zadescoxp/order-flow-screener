@@ -1,9 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <circle cx="16" cy="16" r="15" fill="#d7f75b"/>
-  <path d="M16 4.5a11.5 11.5 0 0 0 0 23z" fill="#0a0b0d"/>
-  <g fill="#0a0b0d">
-    <rect x="18.5" y="9" width="6" height="3.6" rx="1.8"/>
-    <rect x="18.5" y="14.2" width="8" height="3.6" rx="1.8"/>
-    <rect x="18.5" y="19.4" width="4" height="3.6" rx="1.8"/>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#242427"/>
+      <stop offset="1" stop-color="#0a0a0b"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.14"/>
+    </linearGradient>
+  </defs>
+  <!-- Dark glass tile with a lit rim, so the mark reads on light and dark tabs. -->
+  <rect x="0.5" y="0.5" width="31" height="31" rx="8" fill="url(#tile)" stroke="url(#rim)"/>
+  <!-- The split-orb mark in white, scaled into the tile. -->
+  <g transform="translate(16 16) scale(0.7) translate(-16 -16)">
+    <circle cx="16" cy="16" r="15" fill="#f5f5f7"/>
+    <path d="M16 4.5a11.5 11.5 0 0 0 0 23z" fill="#0a0a0b"/>
+    <g fill="#0a0a0b">
+      <rect x="18.5" y="9" width="6" height="3.6" rx="1.8"/>
+      <rect x="18.5" y="14.2" width="8" height="3.6" rx="1.8"/>
+      <rect x="18.5" y="19.4" width="4" height="3.6" rx="1.8"/>
+    </g>
   </g>
 </svg>

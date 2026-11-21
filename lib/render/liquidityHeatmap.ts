@@ -14,17 +14,31 @@ const MAX_ROWS = 4000;
 const RESCALE_EVERY = 30; // snapshots between colour-scale checks
 const RESCALE_DRIFT = 0.35; // rebuild when the 97th percentile moves this much
 
-// Dark blue → cyan → yellow → white, the usual depth-heatmap ramp.
-const STOPS: [number, number, number, number, number][] = [
-  [0.0, 10, 20, 50, 0],
-  [0.12, 22, 48, 110, 0.35],
-  [0.35, 24, 116, 196, 0.6],
-  [0.6, 56, 206, 205, 0.78],
-  [0.82, 248, 226, 110, 0.9],
-  [1.0, 255, 255, 255, 1],
+type Stop = [t: number, r: number, g: number, b: number, a: number];
+
+// One cool hue, ordered by lightness: thin depth is a faint slate haze,
+// typical depth a muted steel blue, and only walls brighten to ice-white.
+// No yellow or cyan, so it sits quietly under the footprint.
+const STOPS_DARK: Stop[] = [
+  [0.0, 20, 24, 34, 0],
+  [0.1, 30, 38, 58, 0.28],
+  [0.35, 46, 70, 112, 0.5],
+  [0.65, 92, 134, 190, 0.72],
+  [0.88, 180, 210, 240, 0.9],
+  [1.0, 246, 250, 255, 1],
 ];
 
-function buildLut(): Uint32Array {
+// Light themes invert the lightness: walls are the darkest ink.
+const STOPS_LIGHT: Stop[] = [
+  [0.0, 220, 228, 240, 0],
+  [0.1, 196, 210, 232, 0.3],
+  [0.35, 140, 168, 214, 0.5],
+  [0.65, 70, 108, 170, 0.7],
+  [0.88, 32, 58, 110, 0.88],
+  [1.0, 14, 26, 56, 1],
+];
+
+function buildLut(STOPS: Stop[]): Uint32Array {
   const lut = new Uint32Array(256);
   for (let i = 0; i < 256; i++) {
     const t = i / 255;
@@ -55,7 +69,8 @@ export interface HeatmapLayout {
 export class LiquidityHeatmapRenderer {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
-  private readonly lut = buildLut();
+  private lut = buildLut(STOPS_DARK);
+  private light = false;
   private epoch = -1;
   private tick = 0;
   private minIdx = 0;
@@ -65,6 +80,14 @@ export class LiquidityHeatmapRenderer {
   private lastScaleSeq = -1;
 
   constructor(private readonly capacity: number) {}
+
+  /** Switch the colour ramp for light or dark themes; the grid repaints on the next update. */
+  setLight(light: boolean): void {
+    if (light === this.light) return;
+    this.light = light;
+    this.lut = buildLut(light ? STOPS_LIGHT : STOPS_DARK);
+    this.epoch = -1;
+  }
 
   /** Bring the grid up to date with the history. */
   update(history: DepthHistory): void {
@@ -141,7 +164,7 @@ export class LiquidityHeatmapRenderer {
     for (let i = 0; i < snap.index.length; i++) {
       const row = this.maxIdx - snap.index[i];
       if (row < 0 || row >= rows) continue;
-      // Mild gamma: typical depth stays blue, only walls reach yellow / white.
+      // Mild gamma: typical depth stays in the steel range, only walls reach the end of the ramp.
       const t = Math.min(1, Math.pow(snap.size[i] * inv, 0.85));
       pixels[row] = this.lut[Math.round(t * 255)];
     }

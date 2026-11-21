@@ -75,8 +75,9 @@ export const DEFAULT_INDICATORS: IndicatorSettings = {
   venueBadges: true,
   absorption: true,
   icebergs: true,
-  priorDay: true,
-  nakedPocs: true,
+  // Prior-session references are opt-in: they crowd the ladder on first load.
+  priorDay: false,
+  nakedPocs: false,
 };
 
 interface UIStore {
@@ -86,6 +87,9 @@ interface UIStore {
   heatmap: HeatmapSettings;
   footprintMode: FootprintMode;
   indicators: IndicatorSettings;
+  /** The studies dock under the chart starts folded into a single bar. */
+  studiesCollapsed: boolean;
+  setStudiesCollapsed: (collapsed: boolean) => void;
   setIndicator: <K extends keyof IndicatorSettings>(key: K, value: IndicatorSettings[K]) => void;
   resetIndicators: () => void;
   setToolProfile: (profile: ToolProfile) => void;
@@ -104,6 +108,8 @@ export const useUIStore = create<UIStore>()(
       heatmap: { tradedVolume: false, restingLiquidity: false },
       footprintMode: "bidask",
       indicators: DEFAULT_INDICATORS,
+      studiesCollapsed: true,
+      setStudiesCollapsed: (studiesCollapsed) => set({ studiesCollapsed }),
       setIndicator: (key, value) => set((state) => ({ indicators: { ...state.indicators, [key]: value } })),
       resetIndicators: () => set({ indicators: DEFAULT_INDICATORS }),
       setToolProfile: (toolProfile) => {
@@ -129,7 +135,7 @@ export const useUIStore = create<UIStore>()(
     }),
     {
       name: "oft-ui-preferences",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => localStorage),
       // Hydrated manually after mount to keep SSR markup stable.
       skipHydration: true,
@@ -140,8 +146,18 @@ export const useUIStore = create<UIStore>()(
         heatmap: state.heatmap,
         footprintMode: state.footprintMode,
         indicators: state.indicators,
+        studiesCollapsed: state.studiesCollapsed,
       }),
-      migrate: () => ({}) as UIStore,
+      // v3 (glass redesign): keep everything, but fold away the prior-day
+      // levels that earlier versions switched on by default.
+      migrate: (persisted, version) => {
+        const saved = (persisted ?? {}) as Partial<UIStore>;
+        if (version < 2) return {} as UIStore;
+        return {
+          ...saved,
+          indicators: { ...DEFAULT_INDICATORS, ...(saved.indicators ?? {}), priorDay: false, nakedPocs: false },
+        } as UIStore;
+      },
       merge: (persisted, current) => {
         const saved = (persisted ?? {}) as Partial<UIStore>;
         return {
