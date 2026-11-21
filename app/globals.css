@@ -447,7 +447,9 @@ button, select, input { font: inherit; color: inherit; }
 .lg-vwap { background: var(--vwap); }
 .lg-poc { background: var(--poc); }
 .lg-liq { box-shadow: 0 0 0 1.5px var(--warn); }
-.lg-depth { width: 14px; border-radius: 3px; background: linear-gradient(90deg, #163070, #1874c4, #38cecd, #f8e26e); }
+.lg-depth { width: 14px; border-radius: 2px; background: linear-gradient(90deg, #1e263a, #2e4670, #5c86be, #f6faff); }
+:root[data-theme="light"] .lg-depth,
+:root[data-theme="light-dull"] .lg-depth { background: linear-gradient(90deg, #c4d2e8, #8ca8d6, #466caa, #0e1a38); }
 .lg-abs { width: 12px; height: 8px; border-radius: 2px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--buy); }
 .lg-ice { width: 8px; height: 8px; border-radius: 1px; transform: rotate(45deg); background: #7dd3fc; }
 .lg-prior { width: 14px; height: 0; border-radius: 0; border-top: 1.5px dashed var(--poc); }
