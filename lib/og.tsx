@@ -11,21 +11,23 @@ export const OG_ALT = `${SITE.name} — real-time footprint, order book, CVD, vo
 
 const font = (file: string) => readFile(join(process.cwd(), "assets/fonts", file));
 
+// Obsidian palette: monochrome glass, colour only where it means something.
 const C = {
-  bg: "#08090b",
-  card: "#111215",
-  border: "#202127",
-  text: "#f2f3f5",
-  muted: "#8b8e98",
-  dim: "#4a4d56",
-  accent: "#d7f75b",
-  buy: "#2fd897",
-  sell: "#ff5c74",
-  vwap: "#a68bff",
-  poc: "#ffc857",
+  bg: "#050506",
+  text: "#f5f5f7",
+  muted: "#a1a1a6",
+  dim: "#636366",
+  line: "rgba(255,255,255,0.09)",
+  lineStrong: "rgba(255,255,255,0.16)",
+  glass: "linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.015))",
+  edge: "inset 0 1px 0 rgba(255,255,255,0.12)",
+  buy: "#3ecf8e",
+  sell: "#f4566b",
+  vwap: "#9aa6ff",
+  poc: "#e6d3a3",
 };
 
-const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="${C.accent}"/><path d="M16 4.5a11.5 11.5 0 0 0 0 23z" fill="#0a0b0d"/><g fill="#0a0b0d"><rect x="18.5" y="9" width="6" height="3.6" rx="1.8"/><rect x="18.5" y="14.2" width="8" height="3.6" rx="1.8"/><rect x="18.5" y="19.4" width="4" height="3.6" rx="1.8"/></g></svg>`;
+const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="${C.text}"/><path d="M16 4.5a11.5 11.5 0 0 0 0 23z" fill="#0a0a0b"/><g fill="#0a0a0b"><rect x="18.5" y="9" width="6" height="3.6" rx="1.8"/><rect x="18.5" y="14.2" width="8" height="3.6" rx="1.8"/><rect x="18.5" y="19.4" width="4" height="3.6" rx="1.8"/></g></svg>`;
 export const LOGO_DATA_URI = `data:image/svg+xml;base64,${Buffer.from(LOGO_SVG).toString("base64")}`;
 
 // A stylised footprint: [sell, buy] volume per price row, for three candles.
@@ -51,7 +53,7 @@ export async function renderShareImage() {
           height: "100%",
           display: "flex",
           background: C.bg,
-          backgroundImage: `radial-gradient(900px 500px at 0% 0%, rgba(215,247,91,0.16), transparent 60%), radial-gradient(700px 500px at 100% 100%, rgba(166,139,255,0.12), transparent 60%)`,
+          backgroundImage: `radial-gradient(900px 520px at 8% -10%, rgba(255,255,255,0.09), transparent 62%), radial-gradient(700px 480px at 100% 110%, rgba(255,255,255,0.05), transparent 60%)`,
           fontFamily: "Geist",
           color: C.text,
           padding: 64,
@@ -64,7 +66,7 @@ export async function renderShareImage() {
             <img src={LOGO_DATA_URI} width={56} height={56} alt="" />
             <div style={{ display: "flex", fontSize: 40, fontWeight: 700 }}>
               <span style={{ letterSpacing: -2 }}>orderflow</span>
-              <span style={{ color: C.accent, marginLeft: -7 }}>.</span>
+              <span style={{ color: C.dim, marginLeft: -7 }}>.</span>
             </div>
           </div>
 
@@ -72,7 +74,7 @@ export async function renderShareImage() {
             <div style={{ display: "flex", flexDirection: "column", fontSize: 66, fontWeight: 700, lineHeight: 1.02, letterSpacing: -3.2 }}>
               <span>See who&apos;s really</span>
               <span>
-                moving the <span style={{ color: C.accent, marginLeft: 16 }}>market.</span>
+                moving the <span style={{ color: C.muted, marginLeft: 16 }}>market.</span>
               </span>
             </div>
             <div style={{ display: "flex", fontSize: 26, fontWeight: 500, color: C.muted, lineHeight: 1.4 }}>
@@ -88,10 +90,11 @@ export async function renderShareImage() {
                   display: "flex",
                   alignItems: "center",
                   height: 44,
-                  padding: "0 20px",
-                  borderRadius: 999,
-                  border: `1px solid ${C.border}`,
-                  background: C.card,
+                  padding: "0 18px",
+                  borderRadius: 12,
+                  border: `1px solid ${C.line}`,
+                  backgroundImage: C.glass,
+                  boxShadow: C.edge,
                   fontSize: 20,
                   fontWeight: 500,
                   color: C.text,
@@ -112,10 +115,11 @@ export async function renderShareImage() {
             width: 430,
             height: "100%",
             padding: 26,
-            borderRadius: 28,
-            border: `1px solid ${C.border}`,
-            background: C.card,
-            boxShadow: "0 30px 80px rgba(0,0,0,0.5)",
+            borderRadius: 24,
+            border: `1px solid ${C.lineStrong}`,
+            backgroundColor: "#0c0c0e",
+            backgroundImage: C.glass,
+            boxShadow: `${C.edge}, 0 40px 90px rgba(0,0,0,0.6)`,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -129,8 +133,9 @@ export async function renderShareImage() {
                 height: 34,
                 alignItems: "center",
                 padding: "0 14px",
-                borderRadius: 999,
-                background: "rgba(47,216,151,0.14)",
+                borderRadius: 8,
+                background: "rgba(62,207,142,0.12)",
+                border: "1px solid rgba(62,207,142,0.24)",
                 color: C.buy,
                 fontFamily: "Geist Mono",
                 fontSize: 18,
@@ -145,8 +150,8 @@ export async function renderShareImage() {
             <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end", gap: 4, width: 70 }}>
               {PROFILE.map((v, i) => (
                 <div key={i} style={{ display: "flex", height: 18 }}>
-                  <div style={{ width: v * 1.4, height: 18, borderRadius: 4, background: i === 4 ? C.poc : "rgba(255,92,116,0.75)" }} />
-                  <div style={{ width: v * 1.4, height: 18, borderRadius: 4, marginLeft: 2, background: i === 4 ? C.poc : "rgba(47,216,151,0.75)" }} />
+                  <div style={{ width: v * 1.4, height: 18, borderRadius: 3, background: i === 4 ? C.poc : "rgba(244,86,107,0.6)" }} />
+                  <div style={{ width: v * 1.4, height: 18, borderRadius: 3, marginLeft: 2, background: i === 4 ? C.poc : "rgba(62,207,142,0.6)" }} />
                 </div>
               ))}
             </div>
@@ -156,8 +161,8 @@ export async function renderShareImage() {
                   const max = 12;
                   return (
                     <div key={ri} style={{ display: "flex", gap: 3, height: 22 }}>
-                      <div style={{ flex: 1, borderRadius: 5, background: `rgba(255,92,116,${0.12 + (sell / max) * 0.7})` }} />
-                      <div style={{ flex: 1, borderRadius: 5, background: `rgba(47,216,151,${0.12 + (buy / max) * 0.7})` }} />
+                      <div style={{ flex: 1, borderRadius: 4, background: `rgba(244,86,107,${0.08 + (sell / max) * 0.6})` }} />
+                      <div style={{ flex: 1, borderRadius: 4, background: `rgba(62,207,142,${0.08 + (buy / max) * 0.6})` }} />
                     </div>
                   );
                 })}
@@ -165,11 +170,11 @@ export async function renderShareImage() {
             ))}
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 22, paddingTop: 18, borderTop: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 22, paddingTop: 18, borderTop: `1px solid ${C.line}` }}>
             {[
               ["VWAP", "75,729.3", C.vwap],
               ["Delta", "+1.1K", C.buy],
-              ["Vol z", "+2.4σ", C.accent],
+              ["Vol z", "+2.4σ", C.text],
             ].map(([label, value, color]) => (
               <div key={label} style={{ display: "flex", flexDirection: "column" }}>
                 <span style={{ fontSize: 16, color: C.dim, fontWeight: 500 }}>{label}</span>
