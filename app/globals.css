@@ -910,8 +910,9 @@ body.is-resizing-row, .is-resizing-row * { cursor: row-resize !important; }
 .studies-bar-chevron { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; transition: transform 0.2s, background 0.15s; }
 .studies-bar:hover .studies-bar-chevron { background: var(--glass-fill-hover); }
 .studies-collapse {
-  position: absolute; z-index: 6; top: -20px; left: 50%; transform: translateX(-50%);
-  display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 8px;
+  /* Sits on the seam between the chart and the dock, like a tab. */
+  position: absolute; z-index: 6; top: calc(var(--gap) / -2 - 8px); left: 50%; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 4px; height: 16px; padding: 0 8px;
   border: 1px solid var(--glass-line-strong); border-radius: 6px;
   background: var(--glass-overlay); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
   color: var(--text-muted); font-size: 10.5px; cursor: pointer; opacity: 0; transition: opacity 0.15s;
