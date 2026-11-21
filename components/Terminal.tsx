@@ -28,6 +28,7 @@ import GlobalTooltip from "@/components/GlobalTooltip";
 import HoverHint from "@/components/HoverHint";
 import StatusBar from "@/components/StatusBar";
 import BugReportDialog from "@/components/BugReportDialog";
+import { Icon } from "@/components/ui/Icons";
 import type { PanelVisibility } from "@/lib/types/market";
 
 // ─── Terminal shell ──────────────────────────────────────────────
@@ -39,14 +40,14 @@ import type { PanelVisibility } from "@/lib/types/market";
 //  │          RV · Depth                 │                  │
 //  └ status bar ──────────────────────────────────────────┘
 
-const STUDIES: { key: keyof PanelVisibility; Component: React.ComponentType; perpOnly?: boolean }[] = [
-  { key: "cvd", Component: CVDPanel },
-  { key: "volumeZ", Component: VolumeZScorePanel },
-  { key: "openInterest", Component: OpenInterestPanel, perpOnly: true },
-  { key: "liquidations", Component: LiquidationsPanel, perpOnly: true },
-  { key: "venues", Component: VenuesPanel },
-  { key: "volatility", Component: VolatilityPanel },
-  { key: "depthOfMarket", Component: DepthOfMarket },
+const STUDIES: { key: keyof PanelVisibility; label: string; Component: React.ComponentType; perpOnly?: boolean }[] = [
+  { key: "cvd", label: "Cumulative delta", Component: CVDPanel },
+  { key: "volumeZ", label: "Volume z-score", Component: VolumeZScorePanel },
+  { key: "openInterest", label: "Open interest", Component: OpenInterestPanel, perpOnly: true },
+  { key: "liquidations", label: "Liquidations", Component: LiquidationsPanel, perpOnly: true },
+  { key: "venues", label: "Venues", Component: VenuesPanel },
+  { key: "volatility", label: "Volatility", Component: VolatilityPanel },
+  { key: "depthOfMarket", label: "Depth", Component: DepthOfMarket },
 ];
 
 export default function Terminal() {
@@ -63,6 +64,8 @@ function SessionTerminal() {
 
   const panels = useUIStore((s) => s.panels);
   const theme = useUIStore((s) => s.theme);
+  const studiesCollapsed = useUIStore((s) => s.studiesCollapsed);
+  const setStudiesCollapsed = useUIStore((s) => s.setStudiesCollapsed);
   const [sidebarWidth, setSidebarWidth] = React.useState(320);
   const [dockHeight, setDockHeight] = React.useState(236);
   const [obiHeight, setObiHeight] = React.useState(160);
@@ -108,9 +111,22 @@ function SessionTerminal() {
           <div className="chart-area">
             <FootprintChart />
           </div>
-          {studies.length > 0 && (
+          {studies.length > 0 && studiesCollapsed && (
+            // Folded: one quiet bar that names what is inside, so the chart keeps the room.
+            <div className="studies-dock is-collapsed">
+              <button type="button" className="studies-bar" aria-expanded={false} onClick={() => setStudiesCollapsed(false)}>
+                <strong>Studies</strong>
+                <span className="studies-bar-list">{studies.map((study) => study.label).join("  ·  ")}</span>
+                <span className="studies-bar-chevron" style={{ transform: "rotate(180deg)" }}><Icon.Chevron /></span>
+              </button>
+            </div>
+          )}
+          {studies.length > 0 && !studiesCollapsed && (
             <div className="studies-dock" style={{ height: dockHeight }}>
               <ResizeHandle direction="top" onResize={(d) => setDockHeight((h) => clamp(h - d, 180, 560))} />
+              <button type="button" className="studies-collapse" aria-expanded onClick={() => setStudiesCollapsed(true)}>
+                <Icon.Chevron /> Hide studies
+              </button>
               {studies.map(({ key, Component }) => (
                 <div key={key} className="study-slot">
                   <Component />
