@@ -20,7 +20,6 @@ export default function AppleIcon() {
           backgroundImage: "radial-gradient(160px 120px at 30% 0%, rgba(255,255,255,0.14), transparent 70%), linear-gradient(180deg, #1c1c1f, #0a0a0b)",
         }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- satori renders plain <img> */}
         <img src={LOGO_DATA_URI} width={116} height={116} alt="" />
       </div>
     ),
