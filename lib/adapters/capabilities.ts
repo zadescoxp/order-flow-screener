@@ -24,3 +24,14 @@ export function venuesForSelection(selection: VenueSelection, marketType: Market
   if (selection !== "all-perps" && selection !== "all-spot") return [selection];
   return venues.filter((venue) => venueSupports(venue, symbol, marketType));
 }
+
+/** "bybit-futures" → "bybit"; single-market venues map to themselves. */
+export function venueBrandOf(venue: Venue): string {
+  return venue.replace(/-(futures|spot)$/, "");
+}
+
+/** The same exchange's venue in the other crypto market, if it has one. */
+export function venueForMarket(venue: Venue, marketType: "perpetual" | "spot"): Venue | undefined {
+  const brand = venueBrandOf(venue);
+  return (marketType === "perpetual" ? PERP_VENUES : SPOT_VENUES).find((v) => venueBrandOf(v) === brand);
+}
