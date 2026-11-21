@@ -81,6 +81,19 @@ interface View {
   followY: boolean;
 }
 
+// Dragging the price axis scales rows, the time header / summary scales
+// columns, and anywhere else on the plot pans — as on TradingView.
+type DragState =
+  | { kind: "pan"; x: number; y: number; scrollX: number; scrollY: number }
+  | { kind: "price"; y: number; rowH: number; centerRow: number; plotH: number }
+  | { kind: "time"; x: number; colW: number; scrollX: number };
+type Zone = "pan" | "price" | "time";
+
+const ROW_H = { min: 3, max: 48, initial: 18 };
+const COL_W = { min: 32, max: 260, initial: 112 };
+const AXIS_DRAG_SCALE = 160; // px of drag for an e-fold change in scale
+const clampTo = (value: number, range: { min: number; max: number }) => Math.min(range.max, Math.max(range.min, value));
+
 interface Layout {
   W: number;
   H: number;
@@ -143,9 +156,10 @@ export default function FootprintChart() {
     [candles, currentCandle]
   );
 
-  const viewRef = useRef<View>({ scrollX: 0, scrollY: 0, rowH: 18, colW: 112, followX: true, followY: true });
+  const viewRef = useRef<View>({ scrollX: 0, scrollY: 0, rowH: ROW_H.initial, colW: COL_W.initial, followX: true, followY: true });
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
-  const dragRef = useRef<{ x: number; y: number; scrollX: number; scrollY: number } | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const zoneRef = useRef<Zone>("pan");
   const layoutRef = useRef<Layout | null>(null);
   const bubblesRef = useRef<Bubble[]>([]);
 
@@ -530,6 +544,13 @@ export default function FootprintChart() {
       // ── Time header ──
       ctx.fillStyle = p.bgPanel;
       ctx.fillRect(plotL, 0, plotW, HEADER_H);
+      if ((dragRef.current?.kind ?? zoneRef.current) === "time") {
+        ctx.fillStyle = withAlpha(p.text, 0.035);
+        ctx.fillRect(plotL, 0, plotW, HEADER_H);
+        if (summaryH) ctx.fillRect(plotL, plotB, plotW, summaryH);
+      }
+      ctx.fillStyle = p.borderMuted;
+      ctx.fillRect(plotL, HEADER_H - 1, plotW, 1);
       ctx.save();
       ctx.beginPath();
       ctx.rect(plotL, 0, plotW, H);
@@ -545,7 +566,7 @@ export default function FootprintChart() {
         if (live) {
           ctx.fillStyle = p.accent;
           ctx.beginPath();
-          ctx.roundRect(x + colW / 2 - 26, 3, 52, HEADER_H - 6, 7);
+          ctx.roundRect(x + colW / 2 - 24, 3, 48, HEADER_H - 6, 4);
           ctx.fill();
         }
         ctx.fillStyle = live ? p.onAccent : p.textMuted;
@@ -572,9 +593,16 @@ export default function FootprintChart() {
       // ── Attached session profile ──
       if (showProfile) drawProfile(ctx, volumeProfile, profileW, plotT, plotB, summaryH, rowH, priceY, p, pocColor);
 
-      // ── Price axis ──
+      // ── Price axis ── (lifts slightly on hover to show it can be dragged)
       ctx.fillStyle = p.bgPanel;
       ctx.fillRect(plotR, 0, AXIS_W, plotB);
+      const zone = dragRef.current?.kind ?? zoneRef.current;
+      if (zone === "price") {
+        ctx.fillStyle = withAlpha(p.text, 0.035);
+        ctx.fillRect(plotR, plotT, AXIS_W, plotB - plotT);
+      }
+      ctx.fillStyle = p.borderMuted;
+      ctx.fillRect(plotR, plotT, 1, plotB - plotT);
       const labelEvery = Math.max(1, Math.ceil(16 / rowH));
       ctx.font = monoFont(10);
       ctx.textAlign = "right";
@@ -593,7 +621,7 @@ export default function FootprintChart() {
         if (y < plotT || y > plotB) return;
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.roundRect(plotR + 4, y - 9, AXIS_W - 8, 18, 9);
+        ctx.roundRect(plotR + 4, y - 9, AXIS_W - 8, 18, 4);
         ctx.fill();
         ctx.fillStyle = textColor;
         ctx.font = monoFont(10, 700);
@@ -605,7 +633,7 @@ export default function FootprintChart() {
           const w = ctx.measureText(label).width + 10;
           ctx.fillStyle = color;
           ctx.beginPath();
-          ctx.roundRect(plotR - w - 2, y - 7, w, 14, 7);
+          ctx.roundRect(plotR - w - 2, y - 7, w, 14, 3);
           ctx.fill();
           ctx.fillStyle = textColor;
           ctx.fillText(label, plotR - w / 2 - 2, y + 1);
@@ -642,7 +670,7 @@ export default function FootprintChart() {
           const y = top ? plotT + 6 + i * 17 : plotB - 20 - i * 17;
           ctx.fillStyle = withAlpha(p.bgPanel, 0.85);
           ctx.beginPath();
-          ctx.roundRect(plotR - w - 4, y, w, 15, 7.5);
+          ctx.roundRect(plotR - w - 4, y, w, 15, 4);
           ctx.fill();
           ctx.strokeStyle = color;
           ctx.lineWidth = 1;
@@ -661,7 +689,7 @@ export default function FootprintChart() {
         const price = yPrice(mouse.y);
         ctx.fillStyle = p.text;
         ctx.beginPath();
-        ctx.roundRect(plotR + 4, mouse.y - 9, AXIS_W - 8, 18, 9);
+        ctx.roundRect(plotR + 4, mouse.y - 9, AXIS_W - 8, 18, 4);
         ctx.fill();
         ctx.fillStyle = p.bgBase;
         ctx.font = monoFont(10, 700);
@@ -696,9 +724,9 @@ export default function FootprintChart() {
       e.preventDefault();
       const view = viewRef.current;
       if (e.ctrlKey || e.metaKey) {
-        view.rowH = Math.min(40, Math.max(4, view.rowH * (e.deltaY > 0 ? 0.9 : 1.1)));
+        view.rowH = clampTo(view.rowH * (e.deltaY > 0 ? 0.9 : 1.1), ROW_H);
       } else if (e.altKey) {
-        view.colW = Math.min(240, Math.max(36, view.colW * (e.deltaY > 0 ? 0.9 : 1.1)));
+        view.colW = clampTo(view.colW * (e.deltaY > 0 ? 0.9 : 1.1), COL_W);
       } else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
         view.scrollX += e.shiftKey ? e.deltaY : -e.deltaX;
         view.followX = view.scrollX <= 0;
@@ -725,13 +753,28 @@ export default function FootprintChart() {
     const drag = dragRef.current;
     if (drag) {
       const view = viewRef.current;
-      view.scrollX = drag.scrollX + (x - drag.x);
-      view.scrollY = drag.scrollY - (y - drag.y);
-      view.followX = view.scrollX <= 0;
-      view.followY = false;
+      if (drag.kind === "price") {
+        // Drag down to compress the ladder, up to stretch it; the centre price stays put.
+        view.rowH = clampTo(drag.rowH * Math.exp(-(y - drag.y) / AXIS_DRAG_SCALE), ROW_H);
+        if (!view.followY) view.scrollY = drag.centerRow * view.rowH - drag.plotH / 2;
+      } else if (drag.kind === "time") {
+        // Drag right to widen columns, left to fit more; the right edge stays anchored.
+        view.colW = clampTo(drag.colW * Math.exp((x - drag.x) / AXIS_DRAG_SCALE), COL_W);
+        view.scrollX = drag.scrollX * (view.colW / drag.colW);
+      } else {
+        view.scrollX = drag.scrollX + (x - drag.x);
+        view.scrollY = drag.scrollY - (y - drag.y);
+        view.followX = view.scrollX <= 0;
+        view.followY = false;
+      }
       hideTooltip();
       redraw();
       return;
+    }
+    const zone = zoneAt(x, y);
+    if (zone !== zoneRef.current) {
+      zoneRef.current = zone;
+      containerRef.current!.style.cursor = zone === "price" ? "ns-resize" : zone === "time" ? "ew-resize" : "";
     }
     redraw();
     const layout = layoutRef.current;
@@ -861,9 +904,62 @@ export default function FootprintChart() {
     );
   };
 
-  const handleMouseLeave = () => {
-    mouseRef.current = null;
+  /** Which drag a press at (x, y) starts: price-axis scale, time scale or pan. */
+  const zoneAt = (x: number, y: number): Zone => {
+    const layout = layoutRef.current;
+    if (!layout) return "pan";
+    if (x > layout.plotR && y <= layout.plotB) return "price";
+    if (x >= layout.plotL && x <= layout.plotR && (y < layout.plotT || y > layout.plotB)) return "time";
+    return "pan";
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const rect = containerRef.current!.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const view = viewRef.current;
+    const layout = layoutRef.current;
+    const zone = zoneAt(x, y);
+    // Keep receiving moves when the pointer leaves the chart mid-drag.
+    e.currentTarget.setPointerCapture(e.pointerId);
+    if (zone === "price" && layout) {
+      const plotH = layout.plotB - layout.plotT;
+      dragRef.current = { kind: "price", y, rowH: view.rowH, centerRow: (view.scrollY + plotH / 2) / view.rowH, plotH };
+    } else if (zone === "time") {
+      dragRef.current = { kind: "time", x, colW: view.colW, scrollX: view.scrollX };
+    } else {
+      dragRef.current = { kind: "pan", x, y, scrollX: view.scrollX, scrollY: view.scrollY };
+      containerRef.current!.style.cursor = "grabbing";
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    if (dragRef.current?.kind === "pan") containerRef.current!.style.cursor = "";
     dragRef.current = null;
+    redraw();
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    const rect = containerRef.current!.getBoundingClientRect();
+    const zone = zoneAt(e.clientX - rect.left, e.clientY - rect.top);
+    const view = viewRef.current;
+    // Double-click an axis to restore its default scale; the plot to follow live.
+    if (zone === "price") {
+      view.rowH = ROW_H.initial;
+      view.followY = true;
+      redraw();
+    } else if (zone === "time") {
+      view.colW = COL_W.initial;
+      redraw();
+    } else resetView();
+  };
+
+  const handleMouseLeave = () => {
+    if (dragRef.current) return; // captured: the drag continues outside
+    mouseRef.current = null;
+    zoneRef.current = "pan";
     hideTooltip();
     setCrosshair(null, null);
     redraw();
@@ -924,26 +1020,19 @@ export default function FootprintChart() {
           {ind.liquidations && marketType === "perpetual" && (
             <span><i className="lg lg-liq" style={{ background: "var(--sell)" }} /><i className="lg lg-liq" style={{ background: "var(--buy)" }} />Liquidations long / short</span>
           )}
-          <span className="legend-hint">Drag to pan · Wheel scroll · ⌘/Ctrl+wheel row zoom · Alt+wheel column width · Double-click to follow</span>
+          <span className="legend-hint">Drag to pan · Drag price or time axis to scale · ⌘/Ctrl / Alt+wheel zoom · Double-click to reset</span>
         </div>
       }
     >
       <div
         ref={containerRef}
         className="canvas-host"
-        onMouseDown={(e) => {
-          const rect = containerRef.current!.getBoundingClientRect();
-          dragRef.current = {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-            scrollX: viewRef.current.scrollX,
-            scrollY: viewRef.current.scrollY,
-          };
-        }}
-        onMouseUp={() => { dragRef.current = null; }}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
-        onDoubleClick={resetView}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerMove={handleMouseMove}
+        onPointerLeave={handleMouseLeave}
+        onDoubleClick={handleDoubleClick}
       >
         <canvas ref={canvasRef} />
         {allCandles.length === 0 && (
