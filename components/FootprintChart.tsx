@@ -557,22 +557,27 @@ export default function FootprintChart() {
       ctx.clip();
       ctx.font = monoFont(10, 500);
       ctx.textAlign = "center";
+      const timeLabelEvery = Math.max(1, Math.ceil(48 / colW));
       for (let ci = startIndex; ci < allCandles.length; ci++) {
         const candle = allCandles[ci];
         const x = colX(ci);
         if (x > plotR) break;
         if (x + colW < plotL) continue;
         const live = !candle.complete && ci === allCandles.length - 1;
+        if (ind.summaryRows) drawSummary(ctx, candle, x, colW, plotB, p);
+        // Narrow columns label every nth candle so times never collide; the
+        // live candle is always labelled.
+        if (!live && ci % timeLabelEvery) continue;
         if (live) {
+          const pillW = Math.min(48, Math.max(colW - 4, 40));
           ctx.fillStyle = p.accent;
           ctx.beginPath();
-          ctx.roundRect(x + colW / 2 - 24, 3, 48, HEADER_H - 6, 4);
+          ctx.roundRect(x + colW / 2 - pillW / 2, 3, pillW, HEADER_H - 6, 4);
           ctx.fill();
-        }
+        } else if (timeLabelEvery > 1 && allCandles.length - 1 - ci < timeLabelEvery) continue;
         ctx.fillStyle = live ? p.onAccent : p.textMuted;
         ctx.font = monoFont(10, live ? 700 : 500);
         ctx.fillText(formatHM(candle.openTime), x + colW / 2, HEADER_H / 2 + 1);
-        if (ind.summaryRows) drawSummary(ctx, candle, x, colW, plotB, p);
       }
       ctx.restore();
 
@@ -1176,6 +1181,7 @@ function drawSummary(ctx: CanvasRenderingContext2D, candle: FootprintCandle, x: 
       ctx.fillStyle = row.bg;
       cell(ctx, x + 3, y + 1, colW - 6, SUMMARY_ROW_H - 2);
     }
+    if (colW < 44) return; // too narrow for numbers: keep only the delta shading
     ctx.fillStyle = row.color;
     ctx.fillText(row.text, x + colW - pad, y + SUMMARY_ROW_H / 2);
   });
