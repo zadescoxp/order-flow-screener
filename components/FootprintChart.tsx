@@ -111,14 +111,14 @@ interface Layout {
   yPrice: (y: number) => number;
 }
 
-function heatColor(t: number): [number, number, number] {
-  const stops: [number, number, number][] = [
-    [12, 34, 64], [20, 104, 160], [64, 190, 210], [250, 236, 160], [250, 160, 40], [230, 60, 40],
-  ];
-  const scaled = Math.max(0, Math.min(1, t)) * (stops.length - 1);
-  const i = Math.min(stops.length - 2, Math.floor(scaled));
-  const f = scaled - i;
-  return stops[i].map((c, k) => Math.round(c + (stops[i + 1][k] - c) * f)) as [number, number, number];
+/**
+ * Traded-volume heat as a single-ink ramp: the theme's text colour at an
+ * opacity that rises with volume. Thin levels all but vanish, heavy ones read
+ * as frosted bands; an ease-in curve keeps the middle of the range quiet.
+ */
+function volumeHeat(ink: string, t: number): string {
+  const x = Math.max(0, Math.min(1, t));
+  return withAlpha(ink, 0.015 + 0.17 * x * x);
 }
 
 export default function FootprintChart() {
@@ -244,9 +244,13 @@ export default function FootprintChart() {
           const y = priceY(level.price);
           if (y + rowH < plotT || y > plotB) continue;
           const t = Math.min(1, level.totalVolume / cap);
-          const [r, g, b] = heatColor(t);
-          ctx.fillStyle = `rgba(${r},${g},${b},${0.08 + t * 0.32})`;
+          ctx.fillStyle = volumeHeat(p.text, t);
           ctx.fillRect(plotL, y, plotW, rowH);
+          // The heaviest levels get a hairline top edge, like light catching glass.
+          if (t > 0.6 && rowH >= 6) {
+            ctx.fillStyle = withAlpha(p.text, 0.05 + 0.1 * (t - 0.6) / 0.4);
+            ctx.fillRect(plotL, Math.round(y), plotW, 1);
+          }
         }
       }
 
