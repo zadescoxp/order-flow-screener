@@ -94,6 +94,8 @@ export interface TerminalActions {
   setValueAreaPct: (pct: number) => void;
 
   finalizeCandle: (candle: FootprintCandle) => void;
+  /** Replace the last finalized candle (a late print from a slower venue amended it). */
+  amendLastCandle: (candle: FootprintCandle) => void;
   updateConnection: (conn: VenueConnection) => void;
   applyMarketDataBatch: (batch: MarketDataBatch) => void;
   setCrosshair: (time: number | null, price: number | null) => void;
@@ -257,6 +259,13 @@ export const createTerminalStore = () => {
           candles: [...s.candles, { ...candle, complete: true }].slice(-MAX_CANDLES),
           currentCandle: null,
         })),
+
+      amendLastCandle: (candle) =>
+        set((s) => {
+          const last = s.candles[s.candles.length - 1];
+          if (!last || last.openTime !== candle.openTime) return {};
+          return { candles: [...s.candles.slice(0, -1), { ...candle, complete: true }] };
+        }),
 
       updateConnection: (conn) =>
         set((s) => ({ connections: { ...s.connections, [conn.venue]: conn } })),

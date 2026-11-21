@@ -1,5 +1,15 @@
 # Order Flow Tracker
 
+**v2.5** — a liquid-glass redesign. The new default **Obsidian** theme is near
+monochrome, with hairline glass borders and frosted menus; colour is kept for
+buy / sell. The footprint's price and time axes scale by dragging, like
+TradingView, both heatmaps have calmer single-hue colours, and the studies
+dock and prior-day levels start folded away. Aggregated venues no longer split
+the footprint into duplicate candles when a slower exchange's prints arrive
+late.
+
+![orderflow. v2.5 terminal: the monochrome glass Obsidian theme on All perps, footprint tooltips on big-print bubbles and cells, the single-hue resting-liquidity and traded-volume heatmaps, open interest, venues and realized volatility studies, and the frosted venue picker](docs/media/orderflow-v2.5-demo.gif)
+
 **v2.4** — every crypto feed now runs on [Siebly](https://siebly.io)'s exchange
 SDKs, with managed heartbeats, reconnects and resubscription. Gate, KuCoin,
 Kraken and HTX join as new venues (10 exchanges, 19 markets), venue logos are
@@ -86,7 +96,14 @@ The footprint's **Indicators** menu lets users configure, per browser:
   average print, at their price and time, sized by notional
 - Liquidation bubbles (ringed) at the liquidation price and time, sized by
   notional (red: longs liquidated, green: shorts liquidated)
-- Follow mode for the live candle and last price, drag/wheel pan and zoom
+- Drag the plot to pan. Drag the **price axis** up or down to stretch or
+  compress rows around the centre price, and drag the **time header** (or the
+  summary rows) to widen or narrow candles with the live candle pinned to the
+  right, as on TradingView. Double-click an axis to reset its scale, or the
+  plot to follow the live candle and last price. ⌘/Ctrl + wheel and Alt +
+  wheel zoom rows and columns
+- Candles only move forward: when a slower venue's print arrives after its
+  candle closed, it is added to that candle instead of reopening it
 - Device-pixel-ratio aware canvas rendering with synchronized crosshair
 
 ### Resting-liquidity heatmap
@@ -99,9 +116,10 @@ footprint header; on by default in the Liquidity workspace).
 - Kept for two hours as typed-array snapshots; drawn from an offscreen grid
   (one pixel column per second, one row per tick) stretched into each candle
   column, so panning and zooming stay cheap
-- Colour runs dark blue → cyan → yellow → white, scaled to the recent 98th
-  percentile so walls stand out; hovering a footprint level shows its resting
-  size
+- One cool hue ordered by lightness — a faint slate haze for thin depth,
+  steel blue for typical depth, ice-white for walls (inverted on light
+  themes) — scaled to the recent 98th percentile so walls stand out; hovering
+  a footprint level shows its resting size
 - Depth reach differs by venue, so the far rows reflect the deeper books:
 
 | Venue | Depth source |
@@ -144,6 +162,9 @@ lead is named in the panel header.
 
 ### Prior-session levels
 
+Off by default; turn them on under Indicators → Previous day levels and Naked
+POCs.
+
 - Previous UTC day's POC, VAH, VAL and VWAP as long-dashed lines with `pPOC`,
   `pVAH`, `pVAL` and `pVWAP` tags
 - Naked POCs from the last seven days — POCs no later day (or today so far)
@@ -163,7 +184,8 @@ lead is named in the panel header.
 - Paints incremental updates to an offscreen canvas
 - Clips intensity near the upper percentile so one large trade does not
   dominate the entire chart
-- Uses the active terminal theme and a low-opacity overlay
+- Drawn in the theme's text colour at an opacity that rises with volume, so
+  thin levels nearly vanish and heavy levels read as soft bands
 - Combines venue data when an aggregate crypto selection is active
 
 The heatmap represents executed volume. It is not a resting-order-book
@@ -359,7 +381,10 @@ The **Export** menu downloads:
 - Currency-pair selection for Forex
 - Timeframe selection from one minute to four hours
 - Workspace presets for order-flow, liquidity, and volatility workflows
-- Theme selection (persisted in the browser)
+- Theme selection (persisted in the browser); the default Obsidian theme is
+  monochrome glass, and every theme shares the glass material
+- Studies dock that starts folded into one bar listing its studies; click it
+  to expand, and use the Hide studies tab to fold it again (persisted)
 - Panel visibility menu (persisted in the browser)
 - Pointer-based panel resizing from visible borders
 - Responsive single-column layout on smaller screens
@@ -577,9 +602,11 @@ Next.js build files across runs. Docker Desktop enables BuildKit by default.
 5. Pick a workspace (Order Flow, Liquidity, Volatility), then fine-tune
    panels from the Panels menu.
 6. In the footprint, switch cell modes, toggle the session Profile and the
-   traded-volume Heatmap, and use Live (or double-click) to follow price.
+   traded-volume Heatmap, drag the price or time axis to scale, and use Live
+   (or double-click) to follow price.
 7. Hover any chart, ladder row or print for details.
-8. Drag panel borders to resize the studies dock, sidebar and sidebar panels.
+8. Click the Studies bar to expand the studies dock, then drag panel borders
+   to resize it, the sidebar and sidebar panels.
 9. Use the theme selector to change the visual theme without changing
    analytical behavior.
 
