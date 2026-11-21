@@ -3,6 +3,7 @@
 // UI preferences (theme, panels, profiles) live in uiStore.
 // ============================================================
 
+import { venueForMarket, venuesForSelection } from "@/lib/adapters/capabilities";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import type {
@@ -203,6 +204,22 @@ export const createTerminalStore = () => {
 
       setMarketType: (marketType) =>
         set((s) => {
+          // Perp <-> spot keeps the exchange (Bybit Perp → Bybit Spot, All perps → All spot).
+          if (marketType !== "forex" && s.marketType !== "forex" && marketType !== s.marketType) {
+            const aggregate = s.venue === "all-perps" || s.venue === "all-spot";
+            const venue = aggregate
+              ? (marketType === "perpetual" ? "all-perps" : "all-spot")
+              : venueForMarket(s.venue as Venue, marketType);
+            if (venue) {
+              return {
+                marketType,
+                venue,
+                selectedVenues: aggregate ? venuesForSelection(venue, marketType, s.symbol) : [venue as Venue],
+                orderBookMode: aggregate ? s.orderBookMode : "single",
+                ...INITIAL_MARKET,
+              };
+            }
+          }
           const isValidVenue =
             marketType === "forex"
               ? isForexVenue(s.venue as Venue)

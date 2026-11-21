@@ -39,7 +39,7 @@ export function Segmented<T extends string | number>({
   accent = false,
 }: {
   value: T;
-  options: readonly { value: T; label: ReactNode; title?: string }[];
+  options: readonly { value: T; label: ReactNode; title?: string; disabled?: boolean }[];
   onChange: (value: T) => void;
   size?: "xs" | "sm" | "md";
   ariaLabel?: string;
@@ -54,8 +54,10 @@ export function Segmented<T extends string | number>({
           role="radio"
           aria-checked={value === option.value}
           title={option.title}
-          className={value === option.value ? "is-active" : ""}
-          onClick={() => onChange(option.value)}
+          // aria-disabled (not disabled) so the title still explains why.
+          aria-disabled={option.disabled || undefined}
+          className={`${value === option.value ? "is-active" : ""}${option.disabled ? " is-disabled" : ""}`}
+          onClick={() => { if (!option.disabled) onChange(option.value); }}
         >
           {option.label}
         </button>

@@ -6,7 +6,7 @@ import { useSessionStore } from "@/lib/session/SessionContext";
 import type { PanelVisibility, Timeframe, ToolProfile, Venue, VenueSelection } from "@/lib/types/market";
 import { FOREX_SYMBOLS } from "@/lib/config/venues";
 import { THEME_OPTIONS, type Theme } from "@/lib/theme";
-import { venueSupports } from "@/lib/adapters/capabilities";
+import { venueForMarket, venuesForSelection, venueSupports } from "@/lib/adapters/capabilities";
 import { ALL_ASSETS, METALS, venuesWithData } from "@/lib/config/instruments";
 import { FOREX_GROUPS } from "@/lib/config/venues";
 import { AssetLogo, VenueLogo } from "@/components/AssetLogo";
@@ -155,6 +155,27 @@ export default function TopBar() {
     }
   };
 
+  // A single exchange keeps its market switch honest: Perp/Spot is disabled when
+  // that exchange has no such market, or doesn't list the current coin in it.
+  const venueLabel = (v: Venue) => [...VENUES.perpetual, ...VENUES.spot].find((o) => o.value === v)?.label ?? v;
+  const singleVenue = !isForex && venue !== "all-perps" && venue !== "all-spot" ? (venue as Venue) : null;
+  const marketBlocked = (target: "perpetual" | "spot"): string | undefined => {
+    if (!singleVenue || marketType === target) return undefined;
+    const kind = target === "spot" ? "spot" : "perpetual";
+    const counterpart = venueForMarket(singleVenue, target);
+    if (!counterpart) return `${venueLabel(singleVenue)} has no ${kind} market`;
+    if (!venueSupports(counterpart, symbol, target)) return `${venueLabel(singleVenue)} has no ${symbol.replace(/USDT$/, "")} ${kind} market`;
+    return undefined;
+  };
+  const perpBlocked = marketBlocked("perpetual");
+  const spotBlocked = marketBlocked("spot");
+
+  // Exchanges with only the other market, shown disabled so the gap is visible.
+  const otherMarketOnly =
+    marketType === "spot" ? VENUES.perpetual.filter((v) => !venueForMarket(v.value, "spot"))
+    : marketType === "perpetual" ? VENUES.spot.filter((v) => !venueForMarket(v.value, "perpetual"))
+    : [];
+
   const venuePickerOptions: PickerOption<VenueSelection>[] = [
     {
       value: aggregateValue,
@@ -167,6 +188,13 @@ export default function TopBar() {
       label: v.label,
       sub: venueSupports(v.value, symbol, marketType) ? (marketType === "perpetual" ? "Perpetual" : "Spot") : `No ${symbol} market`,
       disabled: !venueSupports(v.value, symbol, marketType),
+      icon: <VenueLogo venue={v.value} size={20} />,
+    })),
+    ...otherMarketOnly.map((v) => ({
+      value: v.value as VenueSelection,
+      label: v.label,
+      sub: marketType === "spot" ? "Perpetuals only" : "Spot only",
+      disabled: true,
       icon: <VenueLogo venue={v.value} size={20} />,
     })),
   ];
@@ -192,11 +220,18 @@ export default function TopBar() {
             if (next === marketType) return;
             setMarketType(next);
             if (next === "forex") setSymbol("EUR/USD");
-            else if (isForex || venuesWithData(symbol, next).length === 0) setSymbol("BTCUSDT");
+            else if (isForex || venuesWithData(symbol, next).length === 0) {
+              setSymbol("BTCUSDT");
+              // An aggregate was resolved for the old coin; resolve it for BTC.
+              if (venue === "all-perps" || venue === "all-spot") {
+                const aggregate = next === "perpetual" ? "all-perps" : "all-spot";
+                setSelectedVenues(venuesForSelection(aggregate, next, "BTCUSDT"));
+              }
+            }
           }}
           options={[
-            { value: "perpetual", label: "Perp", title: "Crypto perpetual futures" },
-            { value: "spot", label: "Spot", title: "Crypto spot" },
+            { value: "perpetual", label: "Perp", title: perpBlocked ?? "Crypto perpetual futures", disabled: !!perpBlocked },
+            { value: "spot", label: "Spot", title: spotBlocked ?? "Crypto spot", disabled: !!spotBlocked },
             { value: "forex", label: "FX", title: "Foreign exchange" },
           ]}
           ariaLabel="Market"
