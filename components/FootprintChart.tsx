@@ -231,6 +231,7 @@ export default function FootprintChart() {
       // depthVersion changes when the history gains a snapshot; it is what redraws this layer.
       if (showLiquidity && depthVersion >= 0) {
         const history = marketSession.manager.depthHistory;
+        liquidity.setLight(p.light);
         liquidity.update(history);
         const firstColumn = Math.max(0, Math.floor((plotL - colX(0)) / colW) - 1);
         liquidity.draw(ctx, history, { candles: allCandles, startIndex: firstColumn, colX, colW, plotR, priceY, rowH });
