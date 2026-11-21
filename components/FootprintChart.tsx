@@ -569,7 +569,8 @@ export default function FootprintChart() {
         // live candle is always labelled.
         if (!live && ci % timeLabelEvery) continue;
         if (live) {
-          const pillW = Math.min(48, Math.max(colW - 4, 40));
+          ctx.font = monoFont(10, 700);
+          const pillW = ctx.measureText(formatHM(candle.openTime)).width + 14;
           ctx.fillStyle = p.accent;
           ctx.beginPath();
           ctx.roundRect(x + colW / 2 - pillW / 2, 3, pillW, HEADER_H - 6, 4);
@@ -577,6 +578,7 @@ export default function FootprintChart() {
         } else if (timeLabelEvery > 1 && allCandles.length - 1 - ci < timeLabelEvery) continue;
         ctx.fillStyle = live ? p.onAccent : p.textMuted;
         ctx.font = monoFont(10, live ? 700 : 500);
+        ctx.textAlign = "center"; // drawSummary right-aligns
         ctx.fillText(formatHM(candle.openTime), x + colW / 2, HEADER_H / 2 + 1);
       }
       ctx.restore();
