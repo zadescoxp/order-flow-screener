@@ -10,6 +10,7 @@ import { MarketSessionProvider, useSessionStore } from "@/lib/session/SessionCon
 import { useUIStore } from "@/lib/store/uiStore";
 import { useLayoutStore } from "@/lib/store/layoutStore";
 import GridWorkspace from "@/components/GridWorkspace";
+import SurfacesView from "@/components/SurfacesView";
 import { applyTheme } from "@/lib/theme";
 import TopBar from "@/components/TopBar";
 import MarketStatsBar from "@/components/MarketStatsBar";
@@ -79,6 +80,7 @@ function SessionTerminal() {
   }, []);
 
   const layoutMode = useLayoutStore((s) => s.mode);
+  const view = useUIStore((s) => s.view);
 
   useLayoutEffect(() => {
     applyTheme(theme);
@@ -103,7 +105,9 @@ function SessionTerminal() {
       <ReplayBar />
       <MarketStatsBar />
 
-      {layoutMode === "grid" ? (
+      {view === "surfaces" ? (
+        <SurfacesView />
+      ) : layoutMode === "grid" ? (
         <GridWorkspace />
       ) : (
       <div className="workspace">
