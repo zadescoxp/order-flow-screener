@@ -2,6 +2,10 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { applyTheme, type Theme } from "@/lib/theme";
 import type { HeatmapSettings, PanelVisibility, ToolProfile } from "@/lib/types/market";
+import type { SurfaceKind } from "@/lib/engine/surfaces";
+
+/** The terminal workspace, or the full-window 3D surfaces view. */
+export type AppView = "terminal" | "surfaces";
 
 // Workspace presets. Each profile is a starting layout; panels stay
 // individually toggleable from the Panels menu.
@@ -89,6 +93,10 @@ interface UIStore {
   indicators: IndicatorSettings;
   /** The studies dock under the chart starts folded into a single bar. */
   studiesCollapsed: boolean;
+  view: AppView;
+  surface: SurfaceKind;
+  setView: (view: AppView) => void;
+  setSurface: (surface: SurfaceKind) => void;
   setStudiesCollapsed: (collapsed: boolean) => void;
   setIndicator: <K extends keyof IndicatorSettings>(key: K, value: IndicatorSettings[K]) => void;
   resetIndicators: () => void;
@@ -109,6 +117,10 @@ export const useUIStore = create<UIStore>()(
       footprintMode: "bidask",
       indicators: DEFAULT_INDICATORS,
       studiesCollapsed: true,
+      view: "terminal",
+      surface: "liquidity",
+      setView: (view) => set({ view }),
+      setSurface: (surface) => set({ surface }),
       setStudiesCollapsed: (studiesCollapsed) => set({ studiesCollapsed }),
       setIndicator: (key, value) => set((state) => ({ indicators: { ...state.indicators, [key]: value } })),
       resetIndicators: () => set({ indicators: DEFAULT_INDICATORS }),
@@ -147,6 +159,8 @@ export const useUIStore = create<UIStore>()(
         footprintMode: state.footprintMode,
         indicators: state.indicators,
         studiesCollapsed: state.studiesCollapsed,
+        view: state.view,
+        surface: state.surface,
       }),
       // v3 (glass redesign): keep everything, but fold away the prior-day
       // levels that earlier versions switched on by default.
