@@ -83,6 +83,8 @@ export default function TopBar() {
   const toolProfile = useUIStore((s) => s.toolProfile);
   const setToolProfile = useUIStore((s) => s.setToolProfile);
   const setPanelVisible = useUIStore((s) => s.setPanelVisible);
+  const view = useUIStore((s) => s.view);
+  const setView = useUIStore((s) => s.setView);
   const layoutMode = useLayoutStore((s) => s.mode);
   const gridLayout = useLayoutStore((s) => s.layout);
   const addGridPanel = useLayoutStore((s) => s.addPanel);
@@ -266,6 +268,18 @@ export default function TopBar() {
 
       <div className="topbar-spacer" />
 
+      <div className="topbar-group">
+        <Segmented
+          value={view}
+          onChange={setView}
+          ariaLabel="View"
+          options={[
+            { value: "terminal", label: <span className="view-switch-label"><Icon.Footprint /><span className="hide-compact">Terminal</span></span>, title: "Footprint, book, tape and studies" },
+            { value: "surfaces", label: <span className="view-switch-label"><Icon.Box /><span className="hide-compact">3D Surfaces</span></span>, title: "Liquidity, liquidation, funding and OI surfaces in 3D" },
+          ]}
+        />
+      </div>
+
       <div className="topbar-group topbar-tools">
         <AlertsMenu />
         <RecordingsMenu />
@@ -273,7 +287,7 @@ export default function TopBar() {
       </div>
 
       <div className="topbar-group">
-        {layoutMode === "classic" && <Segmented value={toolProfile} onChange={setToolProfile} options={PROFILES} ariaLabel="Workspace" />}
+        {layoutMode === "classic" && view === "terminal" && <Segmented value={toolProfile} onChange={setToolProfile} options={PROFILES} ariaLabel="Workspace" />}
         <LayoutMenu />
         <Menu hint="Panels" label={<><Icon.Layout /><span className="hide-compact">Panels</span></>}>
           {(["Chart", "Studies", "Sidebar"] as const).map((group) => (
