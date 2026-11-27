@@ -51,6 +51,7 @@ import { RingBuffer } from "@/lib/session/RingBuffer";
 import { DepthHistory, bookSides, type DepthSide } from "@/lib/engine/depthHistory";
 import { AbsorptionDetector, IcebergDetector, type MicroEvent } from "@/lib/engine/microstructure";
 import { VenueTracker } from "@/lib/engine/venues";
+import { SurfaceEngine } from "@/lib/engine/surfaces";
 
 const FLOW_BAR_MS = 1000;
 const MAX_GAP_FILL_BARS = 120;
@@ -160,6 +161,8 @@ export class MarketDataManager {
   private icebergs = new IcebergDetector();
   private pendingMicro: MicroEvent[] = [];
   private venueTracker = new VenueTracker();
+  /** One-second columns for the 3D surfaces view (read by SurfacesView). */
+  readonly surfaces = new SurfaceEngine();
   private venueDirty = false;
   private lastVenueCopy = 0;
   private lastMid = 0;
@@ -235,6 +238,7 @@ export class MarketDataManager {
       this.listeners.set(selectedVenue, { tradeListener, bookListener, statusListener, liquidationListener, derivativesListener });
     }
 
+    this.surfaces.setVenues(venues);
     this.subscribedAt = Date.now();
     this.secondTimer = setInterval(() => this.sampleSecond(Date.now()), OI_SAMPLE_MS);
   }
@@ -242,12 +246,19 @@ export class MarketDataManager {
   /** Once-a-second work: open interest, depth snapshot, iceberg confirmation, venue stats. */
   private sampleSecond(now: number): void {
     if (this.paused && !this.replaying) return;
-    if (this.currentMarketType === "perpetual") this.sampleOpenInterest(now);
+    const openInterest = this.currentMarketType === "perpetual" ? this.sampleOpenInterest(now) : null;
+    const sides: DepthSide[] = [];
+    for (const [venue, book] of this.books) sides.push(this.adapters.get(venue)?.depthSides?.() ?? bookSides(book));
+    const mid = this.lastMid || this.lastPrice;
+    this.surfaces.sample(now, {
+      sides,
+      mid,
+      derivatives: [...this.derivatives.values()],
+      openInterest,
+      lastPrice: this.lastPrice,
+    });
     // Live: sample each venue's full in-memory book. Replay: depth comes from recorded snapshots.
-    if (!this.replaying && this.tickResolved && this.books.size) {
-      const sides: DepthSide[] = [];
-      for (const [venue, book] of this.books) sides.push(this.adapters.get(venue)?.depthSides?.() ?? bookSides(book));
-      const mid = this.lastMid || this.lastPrice;
+    if (!this.replaying && this.tickResolved && sides.length) {
       const snapshot = this.depthHistory.add(now, sides, this.currentTickSize, mid);
       if (snapshot) {
         this.depthDirty = true;
@@ -302,6 +313,7 @@ export class MarketDataManager {
     this.currentTimeframe = config.timeframe;
     this.currentImbalanceThreshold = config.imbalanceThreshold;
     this.tickResolved = false;
+    this.surfaces.setVenues(config.selectedVenues);
   }
 
   /** Feed one recorded event; `at` is its original arrival time. */
@@ -373,6 +385,7 @@ export class MarketDataManager {
     this.pendingMicro = [];
     this.venueTracker.clear();
     this.venueDirty = false;
+    this.surfaces.clear();
     this.derivatives.clear();
     this.derivativesDirty = false;
     this.pendingLiquidations = [];
@@ -490,6 +503,7 @@ export class MarketDataManager {
       if (ratio >= BIG_TRADE_MIN_RATIO) this.pendingBigTrades.push({ ...trade, ratio });
     }
     this.tapeLog.push(trade);
+    this.surfaces.onTrade(trade.price, trade.quantity, trade.side);
 
     this.updateFlowBar(trade);
 
@@ -543,6 +557,7 @@ export class MarketDataManager {
       if (ratio >= BIG_TRADE_MIN_RATIO) this.pendingBigTrades.push({ ...trade, ratio });
     }
     this.tapeLog.push(trade);
+    this.surfaces.onTrade(trade.price, trade.quantity, trade.side);
     this.updateFlowBar(trade);
     this.pendingTrades.push(trade);
     this.scheduleFlush();
@@ -639,24 +654,25 @@ export class MarketDataManager {
     );
   }
 
-  /** Sample summed open interest once a second, against the last traded price. */
-  private sampleOpenInterest(now: number): void {
-    if ((this.paused && !this.replaying) || !this.lastPrice) return;
+  /** Sample summed open interest once a second, against the last traded price. Returns it, or null. */
+  private sampleOpenInterest(now: number): number | null {
+    if ((this.paused && !this.replaying) || !this.lastPrice) return null;
     const reporting = [...this.derivatives.values()].filter((s) => s.openInterest !== undefined).map((s) => s.venue);
     if (!this.oiVenues) {
       const allReported = this.currentSelectedVenues.every((v) => reporting.includes(v));
-      if (!reporting.length || (!allReported && now - this.subscribedAt < OI_LOCK_GRACE_MS)) return;
+      if (!reporting.length || (!allReported && now - this.subscribedAt < OI_LOCK_GRACE_MS)) return null;
       this.oiVenues = new Set(reporting);
       this.derivativesDirty = true;
     }
     const aggregate = this.computeDerivatives();
-    if (aggregate?.openInterest == null) return;
+    if (aggregate?.openInterest == null) return null;
     this.pendingOIPoints.push({
       time: Math.floor(now / OI_SAMPLE_MS) * OI_SAMPLE_MS,
       openInterest: aggregate.openInterest,
       price: this.lastPrice,
     });
     this.scheduleFlush();
+    return aggregate.openInterest;
   }
 
   pause(): void {
